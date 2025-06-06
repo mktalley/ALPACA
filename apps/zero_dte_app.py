@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     PROFIT_TARGET_PCT: float = Field(
         0.50, description="Profit target as a percent of entry price (e.g. 0.5 = 50%)"
     )
-    POLL_INTERVAL: float = Field(1.0, description="Seconds between price checks")
+    POLL_INTERVAL: float = Field(120.0, description="Seconds between price checks")
     EXIT_CUTOFF: dt_time = Field(
         dt_time(15, 45), description="Hard exit time (wall clock) if target not hit"
     )
