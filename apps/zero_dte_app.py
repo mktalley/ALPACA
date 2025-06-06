@@ -13,7 +13,15 @@ import logging
 from datetime import date, datetime, time as dt_time
 from typing import Dict
 
-from pydantic import BaseSettings, Field, validator
+try:
+    from pydantic import BaseSettings
+except Exception:
+    class BaseSettings:
+        """Dummy BaseSettings for environments without pydantic v1 BaseSettings"""
+        pass
+
+
+from pydantic import Field, validator
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
@@ -79,7 +87,7 @@ def choose_atm_contract(
     symbol: str,
 ) -> str:
     today = date.today().isoformat()
-    chain = trading.get_option_contracts(
+    chain = TradingClient.get_option_contracts(trading,
         GetOptionContractsRequest(
             underlying_symbols=[symbol],
             expiration_date=today,
@@ -131,7 +139,7 @@ def choose_otm_strangle_contracts(
     Fetches today's option chain and returns the nearest OTM call and put symbols.
     """
     today = date.today().isoformat()
-    chain = trading.get_option_contracts(
+    chain = TradingClient.get_option_contracts(trading,
         GetOptionContractsRequest(
             underlying_symbols=[symbol],
             expiration_date=today,
@@ -161,9 +169,8 @@ def submit_strangle(
     """
     call_leg = OptionLegRequest(
         symbol=call_symbol,
-        qty=qty,
+        ratio_qty=qty,
         side=OrderSide.BUY,
-        time_in_force=TimeInForce.DAY,
     )
     put_leg = OptionLegRequest(
         symbol=put_symbol,
