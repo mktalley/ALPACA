@@ -11,17 +11,37 @@ Designed for institutional clients:
 import time
 import logging
 from datetime import date, datetime, time as dt_time
+from zoneinfo import ZoneInfo
 from typing import Dict
+import os
+import threading
+# Configure timezone for Pacific Time logging
+os.environ['TZ'] = 'America/Los_Angeles'
+time.tzset()
+import pydantic
+from pydantic import SecretStr
+# Workaround: alias Secret to SecretStr so pydantic-settings can import Secret
+pydantic.Secret = SecretStr
 
+
+
+
+
+import pydantic
+from pydantic import SecretStr
+# Workaround: alias Secret to SecretStr so pydantic-settings can import Secret
+setattr(pydantic, 'Secret', SecretStr)
+
+# Prefer pydantic BaseSettings; fall back to pydantic_settings only if available without errors
 try:
-    from pydantic import BaseSettings
+    # pydantic_settings may not be compatible with the installed pydantic version
+    from pydantic_settings import BaseSettings
 except Exception:
-    class BaseSettings:
-        """Dummy BaseSettings for environments without pydantic v1 BaseSettings"""
-        pass
+    from pydantic import BaseSettings
 
 
-from pydantic import Field, validator
+
+from pydantic import Field, field_validator
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
@@ -37,6 +57,9 @@ from alpaca.data.requests import (
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.historical.option import OptionHistoricalDataClient
 
+import math, requests, statistics
+from alpaca.data.requests import StockBarsRequest, OptionSnapshotRequest
+from alpaca.data.timeframe import TimeFrame
 
 class Settings(BaseSettings):
     ALPACA_API_KEY: str
@@ -50,14 +73,21 @@ class Settings(BaseSettings):
     )
     POLL_INTERVAL: float = Field(120.0, description="Seconds between price checks")
     EXIT_CUTOFF: dt_time = Field(
-        dt_time(15, 45), description="Hard exit time (wall clock) if target not hit"
+        dt_time(22, 45), description="Hard exit time (wall clock) if target not hit"
+    )
+    MAX_TRADES: int = Field(6, description="Maximum number of strangle trades per day")
+    TRADE_START: dt_time = Field(
+        dt_time(9, 45), description="Earliest time to enter trades (PT)"
+    )
+    TRADE_END: dt_time = Field(
+        dt_time(12, 30), description="Latest time to enter trades (PT)"
     )
 
     class Config:
-        env_file = ".env"
+        env_file = "apps/.env"
         env_file_encoding = "utf-8"
 
-    @validator("EXIT_CUTOFF", pre=True)
+    @field_validator("EXIT_CUTOFF", mode="before")
     def parse_exit_time(cls, v):
         if isinstance(v, str):
             return dt_time.fromisoformat(v)
@@ -139,25 +169,45 @@ def choose_otm_strangle_contracts(
     Fetches today's option chain and returns the nearest OTM call and put symbols.
     """
     today = date.today().isoformat()
-    chain = TradingClient.get_option_contracts(trading,
+    option_resp = TradingClient.get_option_contracts(trading,
         GetOptionContractsRequest(
             underlying_symbols=[symbol],
             expiration_date=today,
             limit=500,
         )
     )
+    if isinstance(option_resp, list):
+        chain = option_resp
+    else:
+        chain = option_resp.option_contracts or []
     spot = get_underlying_price(stock_client, symbol)
-    calls = [c for c in chain if c.contract_type == "call" and c.strike > spot]
-    puts = [c for c in chain if c.contract_type == "put" and c.strike < spot]
+
+    # normalize contract type and strike attributes
+    def ct(c):
+        if hasattr(c, 'contract_type'):
+            return c.contract_type
+        t = getattr(c, 'type', None)
+        return t.value if hasattr(t, 'value') else t
+
+    def st(c):
+        if hasattr(c, 'strike'):
+            return c.strike
+        return getattr(c, 'strike_price', 0)
+
+    # filter OTM calls and puts
+    calls = [c for c in chain if ct(c) == 'call' and st(c) > spot]
+    puts = [c for c in chain if ct(c) == 'put' and st(c) < spot]
     if not calls or not puts:
         raise RuntimeError(f"Could not find OTM strikes for {symbol} on {today}")
+
     # nearest OTM
-    call = min(calls, key=lambda c: c.strike - spot)
-    put = min(puts, key=lambda p: spot - p.strike)
+    call = min(calls, key=lambda c: st(c) - spot)
+    put = min(puts, key=lambda p: spot - st(p))
     logging.info(
         "OTM Strangle for %s: call %s (@%.2f) & put %s (@%.2f)",
-        symbol, call.symbol, call.strike, put.symbol, put.strike
+        symbol, call.symbol, st(call), put.symbol, st(put)
     )
+    return call.symbol, put.symbol
     return call.symbol, put.symbol
 
 
@@ -294,6 +344,56 @@ def monitor_and_exit(
     return resp
 
 
+
+def run_strangle(
+    trading: TradingClient,
+    stock_client: StockHistoricalDataClient,
+    option_client: OptionHistoricalDataClient,
+    symbol: str,
+    qty: int,
+    target_pct: float,
+    poll_interval: float,
+    exit_cutoff: dt_time,
+):
+    """
+    Helper to place and monitor a single OTM strangle.
+    """
+    try:
+        call_sym, put_sym = choose_otm_strangle_contracts(trading, stock_client, symbol)
+        strangle_resp = submit_strangle(trading, call_sym, put_sym, qty)
+        start_time = time.time()
+        fill_timeout = 30  # seconds
+        filled_prices = []
+        for leg in strangle_resp.legs:
+            leg_id = leg.id
+            logging.info("Waiting for fill on leg %s", leg_id)
+            while True:
+                current_leg = trading.get_order_by_id(leg_id)
+                avg_price = current_leg.filled_avg_price
+                if avg_price is not None and float(avg_price) > 0:
+                    filled_prices.append(float(avg_price))
+                    logging.info("Leg %s filled at %.4f", leg_id, float(avg_price))
+                    break
+                if time.time() - start_time > fill_timeout:
+                    logging.error("Timeout waiting for fill on leg %s. Aborting this strangle.", leg_id)
+                    return
+                time.sleep(1)
+        entry_price_sum = sum(filled_prices)
+        logging.info("Entry prices %s → entry_price_sum=%.4f", filled_prices, entry_price_sum)
+        monitor_and_exit_strangle(
+            trading,
+            option_client,
+            symbols=[call_sym, put_sym],
+            entry_price_sum=entry_price_sum,
+            qty=qty,
+            target_pct=target_pct,
+            poll_interval=poll_interval,
+            exit_cutoff=exit_cutoff,
+        )
+    except Exception as e:
+        logging.error("Error in run_strangle: %s", e, exc_info=True)
+
+
 def main():
     setup_logging()
     cfg = Settings()
@@ -309,40 +409,81 @@ def main():
     stock_hist = StockHistoricalDataClient(
         api_key=cfg.ALPACA_API_KEY,
         secret_key=cfg.ALPACA_API_SECRET,
-        sandbox=cfg.PAPER,
+        sandbox=False,  # always use live market data endpoint
     )
     option_hist = OptionHistoricalDataClient(
         api_key=cfg.ALPACA_API_KEY,
         secret_key=cfg.ALPACA_API_SECRET,
-        sandbox=cfg.PAPER,
+        sandbox=False  # use live data endpoint,
     )
+    # Wait until market is open before submitting orders
+    clock = trading.get_clock()
+    while not clock.is_open:
+        logging.warning(
+            "Market is closed (next open at %s). Sleeping 60 seconds...",
+            clock.next_open.isoformat(),
+        )
+        time.sleep(60)
+        clock = trading.get_clock()
 
-    # Choose OTM strikes for strangle
-    call_sym, put_sym = choose_otm_strangle_contracts(trading, stock_hist, cfg.UNDERLYING)
-    # Submit OTM strangle
-    strangle_resp = submit_strangle(trading, call_sym, put_sym, cfg.QTY)
-    # Sum entry prices from both legs
-    try:
-        entry_price_sum = sum(float(leg.filled_avg_price or 0.0) for leg in strangle_resp.legs)
-    except Exception:
-        logging.error("Failed to compute entry price sum from response legs. Exiting.")
-        return
-    if entry_price_sum <= 0:
-        logging.error("Entry price sum is zero or invalid. Exiting.")
-        return
 
-    # Monitor & exit strangle
-    monitor_and_exit_strangle(
-        trading,
-        option_hist,
-        symbols=[call_sym, put_sym],
-        entry_price_sum=entry_price_sum,
-        qty=cfg.QTY,
-        target_pct=cfg.PROFIT_TARGET_PCT,
-        poll_interval=cfg.POLL_INTERVAL,
-        exit_cutoff=cfg.EXIT_CUTOFF,
-    )
-    logging.info("Strategy run complete.")
+
+    # Hybrid scheduling: fixed anchor trades + event-triggered trades
+    today = date.today()
+    trade_start_dt = datetime.combine(today, cfg.TRADE_START)
+    trade_end_dt = datetime.combine(today, cfg.TRADE_END)
+    mid_dt = trade_start_dt + (trade_end_dt - trade_start_dt) / 2
+
+    EVENT_MOVE_PCT = 0.005
+
+    threads: list[threading.Thread] = []
+    trades_done = 0
+    # initial spot price
+    last_spot = get_underlying_price(stock_hist, cfg.UNDERLYING)
+
+    anchors = [trade_start_dt, mid_dt, trade_end_dt]
+    for i, anchor in enumerate(anchors):
+        if trades_done >= cfg.MAX_TRADES:
+            break
+        now = datetime.now()
+        if now < anchor:
+            secs = (anchor - now).total_seconds()
+            logging.info("Sleeping until anchor trade #%d at %s", trades_done + 1, anchor.time())
+            time.sleep(secs)
+        logging.info("Anchor trade #%d at %s", trades_done + 1, anchor.time())
+        t = threading.Thread(
+            target=run_strangle,
+            args=(trading, stock_hist, option_hist, cfg.UNDERLYING, cfg.QTY, cfg.PROFIT_TARGET_PCT, cfg.POLL_INTERVAL, cfg.EXIT_CUTOFF),
+            daemon=True,
+        )
+        t.start()
+        threads.append(t)
+        trades_done += 1
+        last_spot = get_underlying_price(stock_hist, cfg.UNDERLYING)
+
+        # Event-triggered trades until next anchor
+        if i < len(anchors) - 1:
+            next_anchor = anchors[i + 1]
+            while trades_done < cfg.MAX_TRADES and datetime.now() < next_anchor:
+                time.sleep(cfg.POLL_INTERVAL)
+                curr_spot = get_underlying_price(stock_hist, cfg.UNDERLYING)
+                pct_move = abs(curr_spot - last_spot) / last_spot
+                if pct_move >= EVENT_MOVE_PCT:
+                    logging.info("Price moved %.2f%%, triggering event trade #%d", pct_move * 100, trades_done + 1)
+                    t = threading.Thread(
+                        target=run_strangle,
+                        args=(trading, stock_hist, option_hist, cfg.UNDERLYING, cfg.QTY, cfg.PROFIT_TARGET_PCT, cfg.POLL_INTERVAL, cfg.EXIT_CUTOFF),
+                        daemon=True,
+                    )
+                    t.start()
+                    threads.append(t)
+                    trades_done += 1
+                    last_spot = curr_spot
+
+    # Wait for all strangle threads to complete
+    for t in threads:
+        t.join()
+    logging.info("All %d trades completed", trades_done)
 
 
 if __name__ == "__main__":
