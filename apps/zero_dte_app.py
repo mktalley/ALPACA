@@ -219,12 +219,12 @@ def submit_strangle(
     """
     call_leg = OptionLegRequest(
         symbol=call_symbol,
-        ratio_qty=qty,
+        ratio_qty=1,
         side=OrderSide.BUY,
     )
     put_leg = OptionLegRequest(
         symbol=put_symbol,
-        ratio_qty=qty,
+        ratio_qty=1,
         side=OrderSide.BUY,
     )
     order = MarketOrderRequest(
@@ -277,7 +277,7 @@ def monitor_and_exit_strangle(
 
     # exit legs
     legs = [
-        OptionLegRequest(symbol=sym, ratio_qty=qty, side=OrderSide.SELL)
+        OptionLegRequest(symbol=sym, ratio_qty=1, side=OrderSide.SELL)
         for sym in symbols
     ]
     exit_order = MarketOrderRequest(
