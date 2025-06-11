@@ -502,4 +502,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    while True:
+        # clear existing handlers so logging resets each day
+        for h in logging.root.handlers[:]:
+            logging.root.removeHandler(h)
+        main()
+        cfg = Settings()
+        # compute next day's start time
+        tomorrow = date.today() + timedelta(days=1)
+        next_start = datetime.combine(tomorrow, cfg.TRADE_START)
+        secs = (next_start - datetime.now()).total_seconds()
+        logging.info("Sleeping until next trading day start at %s (%.0f seconds)", next_start, secs)
+        time.sleep(secs)
