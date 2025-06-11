@@ -15,8 +15,8 @@ from zoneinfo import ZoneInfo
 from typing import Dict
 import os
 import threading
-# Configure timezone for Pacific Time logging
-os.environ['TZ'] = 'America/Los_Angeles'
+# Configure timezone for Eastern Time logging
+os.environ['TZ'] = 'America/New_York'
 time.tzset()
 import pydantic
 from pydantic import SecretStr
@@ -77,10 +77,10 @@ class Settings(BaseSettings):
     )
     MAX_TRADES: int = Field(6, description="Maximum number of strangle trades per day")
     TRADE_START: dt_time = Field(
-        dt_time(9, 45), description="Earliest time to enter trades (PT)"
+        dt_time(9, 45), description="Earliest time to enter trades (ET)"
     )
     TRADE_END: dt_time = Field(
-        dt_time(12, 30), description="Latest time to enter trades (PT)"
+        dt_time(12, 30), description="Latest time to enter trades (ET)"
     )
 
     class Config:
