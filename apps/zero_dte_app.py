@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     EXIT_CUTOFF: dt_time = Field(
         dt_time(22, 45), description="Hard exit time (wall clock) if target not hit"
     )
-    MAX_TRADES: int = Field(6, description="Maximum number of strangle trades per day")
+    MAX_TRADES: int = Field(10, description="Maximum number of strangle trades per day")
     TRADE_START: dt_time = Field(
         dt_time(9, 45), description="Earliest time to enter trades (ET)"
     )
@@ -432,16 +432,19 @@ def main():
     today = date.today()
     trade_start_dt = datetime.combine(today, cfg.TRADE_START)
     trade_end_dt = datetime.combine(today, cfg.TRADE_END)
-    mid_dt = trade_start_dt + (trade_end_dt - trade_start_dt) / 2
+    duration = trade_end_dt - trade_start_dt
+    quarter_dt = trade_start_dt + duration / 4
+    mid_dt = trade_start_dt + duration / 2
+    three_quarter_dt = trade_start_dt + (3 * duration) / 4
 
-    EVENT_MOVE_PCT = 0.005
+    EVENT_MOVE_PCT = 0.0025  # Lowered to 0.25% move for more entries
 
     threads: list[threading.Thread] = []
     trades_done = 0
     # initial spot price
     last_spot = get_underlying_price(stock_hist, cfg.UNDERLYING)
 
-    anchors = [trade_start_dt, mid_dt, trade_end_dt]
+    anchors = [trade_start_dt, quarter_dt, mid_dt, three_quarter_dt, trade_end_dt]  # Expanded anchor times
     for i, anchor in enumerate(anchors):
         if trades_done >= cfg.MAX_TRADES:
             break
