@@ -67,7 +67,7 @@ class Settings(BaseSettings):
     PAPER: bool = True
 
     UNDERLYING: str = Field("SPY", description="Underlying symbol to trade options on")
-    QTY: int = Field(1, description="Number of contracts per leg")
+    QTY: int = Field(5, description="Number of contracts per leg")
     PROFIT_TARGET_PCT: float = Field(
         0.50, description="Profit target as a percent of entry price (e.g. 0.5 = 50%)"
     )
