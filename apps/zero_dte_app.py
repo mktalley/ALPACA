@@ -96,10 +96,22 @@ class Settings(BaseSettings):
 
 
 def setup_logging():
+    # Rotate logs daily by writing to a date-stamped file in logs/
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    logs_dir = os.path.join(root, 'logs')
+    os.makedirs(logs_dir, exist_ok=True)
+    # Filename is the trading date (YYYY-MM-DD).log
+    log_filename = date.today().isoformat() + '.log'
+    log_path = os.path.join(logs_dir, log_filename)
+    handlers = [
+        logging.StreamHandler(),
+        logging.FileHandler(log_path)
+    ]
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=handlers
     )
 
 
