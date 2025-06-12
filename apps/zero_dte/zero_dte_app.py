@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 from typing import Dict
 import os
 import threading
+import argparse
 # Configure timezone for Eastern Time logging
 os.environ['TZ'] = 'America/New_York'
 time.tzset()
@@ -54,6 +55,8 @@ from alpaca.data.requests import (
     StockLatestTradeRequest,
     OptionLatestTradeRequest,
 )
+from apps.zero_dte.two_phase import run_two_phase
+
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.historical.option import OptionHistoricalDataClient
 
@@ -502,6 +505,11 @@ def main():
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--strategy", choices=["strangle", "two_phase"], default="strangle",
+                        help="Trading strategy to run: single-phase strangle or two-phase flip")
+    args = parser.parse_args()
+    strategy = args.strategy
     while True:
         # clear existing handlers so logging resets each day
         for h in logging.root.handlers[:]:
