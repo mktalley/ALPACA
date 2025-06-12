@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     )
 
     class Config:
-        env_file = "apps/.env"
+        env_file = "apps/zero_dte/.env"
         env_file_encoding = "utf-8"
 
     @field_validator("EXIT_CUTOFF", mode="before")
