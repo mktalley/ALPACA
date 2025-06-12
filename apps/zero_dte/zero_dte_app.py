@@ -47,6 +47,7 @@ from pydantic import Field, field_validator
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 from alpaca.trading.requests import (
+
     GetOptionContractsRequest,
     MarketOrderRequest,
     OptionLegRequest,
@@ -55,7 +56,7 @@ from alpaca.data.requests import (
     StockLatestTradeRequest,
     OptionLatestTradeRequest,
 )
-from apps.zero_dte.two_phase import run_two_phase
+
 
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.historical.option import OptionHistoricalDataClient
@@ -78,7 +79,11 @@ class Settings(BaseSettings):
     EXIT_CUTOFF: dt_time = Field(
         dt_time(22, 45), description="Hard exit time (wall clock) if target not hit"
     )
+    STOP_LOSS_PCT: float = Field(
+        0.3, description="Max allowable loss as a percent of entry (e.g. 0.3 = 30%)"
+    )
     MAX_TRADES: int = Field(10, description="Maximum number of strangle trades per day")
+
     TRADE_START: dt_time = Field(
         dt_time(9, 45), description="Earliest time to enter trades (ET)"
     )
@@ -263,30 +268,39 @@ def monitor_and_exit_strangle(
     poll_interval: float,
     exit_cutoff: dt_time,
 ):
-    """
-    Polls the legs' last trade prices, exits both when combined profit or at cutoff.
-    """
+    cfg = Settings()
     target_sum = entry_price_sum * (1 + target_pct)
+    stop_loss_sum = entry_price_sum * (1 - cfg.STOP_LOSS_PCT)
     logging.info(
-        "Monitoring strangle %s: entry_sum=%.4f, target_sum=%.4f, cutoff=%s",
-        symbols, entry_price_sum, target_sum, exit_cutoff.isoformat(),
+        "Monitoring strangle %s: entry_sum=%.4f, target_sum=%.4f, stop_loss_sum=%.4f, cutoff=%s",
+        symbols, entry_price_sum, target_sum, stop_loss_sum, exit_cutoff.isoformat(),
     )
+    
+    # Poll the legs' last trade prices; exit on profit target, stop-loss breach, or cutoff
 
     while True:
         now = datetime.now()
         if now.time() >= exit_cutoff:
             logging.warning("Cutoff time reached (%s). Exiting...", exit_cutoff)
             break
-        prices = []
-        for sym in symbols:
-            trade = OptionHistoricalDataClient.get_option_latest_trade(option_client, 
-                OptionLatestTradeRequest(symbol_or_symbols=[sym])
-            )[sym]
-            prices.append(float(trade.price))
+                # fetch latest prices with retry on transient errors
+        try:
+            trades = OptionHistoricalDataClient.get_option_latest_trade(
+                option_client,
+                OptionLatestTradeRequest(symbol_or_symbols=symbols)
+            )
+            prices = [float(trades[sym].price) for sym in symbols]
+        except requests.exceptions.RequestException as err:
+            logging.warning("Error fetching prices %s: %s – retrying in 5s", symbols, err)
+            time.sleep(5)
+            continue
         current_sum = sum(prices)
         logging.debug("Current prices %s → %.4f (sum)", symbols, current_sum)
         if current_sum >= target_sum:
             logging.info("Target hit: %.4f >= %.4f", current_sum, target_sum)
+            break
+        if current_sum <= stop_loss_sum:
+            logging.info("Stop-loss hit: %.4f <= %.4f", current_sum, stop_loss_sum)
             break
         time.sleep(poll_interval)
 
