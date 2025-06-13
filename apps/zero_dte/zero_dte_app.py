@@ -65,6 +65,12 @@ import math, requests, statistics
 from alpaca.data.requests import StockBarsRequest, OptionSnapshotRequest
 from alpaca.data.timeframe import TimeFrame
 
+# Placeholder for two-phase strategy; will import dynamically in main or be stubbed in tests
+run_two_phase = None
+
+
+
+
 class Settings(BaseSettings):
     ALPACA_API_KEY: str
     ALPACA_API_SECRET: str
@@ -81,6 +87,9 @@ class Settings(BaseSettings):
     )
     STOP_LOSS_PCT: float = Field(
         0.3, description="Max allowable loss as a percent of entry (e.g. 0.3 = 30%)"
+    )
+    CONDOR_TARGET_PCT: float = Field(
+        0.25, description="Profit target as a percent for the condor phase in two-phase strategy"
     )
     MAX_TRADES: int = Field(10, description="Maximum number of strangle trades per day")
 
@@ -423,7 +432,7 @@ def run_strangle(
         logging.error("Error in run_strangle: %s", e, exc_info=True)
 
 
-def main():
+def main(strategy: str = "strangle"):
     setup_logging()
     cfg = Settings()
     logging.info(
@@ -472,6 +481,17 @@ def main():
     trades_done = 0
     # initial spot price
     last_spot = get_underlying_price(stock_hist, cfg.UNDERLYING)
+    # Prepare common arguments tuple for threads
+    common_args = (trading, stock_hist, option_hist, cfg.UNDERLYING, cfg.QTY, cfg.PROFIT_TARGET_PCT, cfg.POLL_INTERVAL, cfg.EXIT_CUTOFF)
+
+    # Determine thread target and args based on strategy
+    if strategy == "two_phase":
+        thread_target = run_two_phase
+        thread_args = common_args + (cfg.CONDOR_TARGET_PCT,)
+    else:
+        thread_target = run_strangle
+        thread_args = common_args
+
 
     anchors = [trade_start_dt, quarter_dt, mid_dt, three_quarter_dt, trade_end_dt]  # Expanded anchor times
     for i, anchor in enumerate(anchors):
@@ -483,11 +503,7 @@ def main():
             logging.info("Sleeping until anchor trade #%d at %s", trades_done + 1, anchor.time())
             time.sleep(secs)
         logging.info("Anchor trade #%d at %s", trades_done + 1, anchor.time())
-        t = threading.Thread(
-            target=run_strangle,
-            args=(trading, stock_hist, option_hist, cfg.UNDERLYING, cfg.QTY, cfg.PROFIT_TARGET_PCT, cfg.POLL_INTERVAL, cfg.EXIT_CUTOFF),
-            daemon=True,
-        )
+        t = threading.Thread(target=thread_target, args=thread_args, daemon=True)
         t.start()
         threads.append(t)
         trades_done += 1
@@ -502,11 +518,7 @@ def main():
                 pct_move = abs(curr_spot - last_spot) / last_spot
                 if pct_move >= EVENT_MOVE_PCT:
                     logging.info("Price moved %.2f%%, triggering event trade #%d", pct_move * 100, trades_done + 1)
-                    t = threading.Thread(
-                        target=run_strangle,
-                        args=(trading, stock_hist, option_hist, cfg.UNDERLYING, cfg.QTY, cfg.PROFIT_TARGET_PCT, cfg.POLL_INTERVAL, cfg.EXIT_CUTOFF),
-                        daemon=True,
-                    )
+                    t = threading.Thread(target=thread_target, args=thread_args, daemon=True)
                     t.start()
                     threads.append(t)
                     trades_done += 1
@@ -528,7 +540,7 @@ if __name__ == "__main__":
         # clear existing handlers so logging resets each day
         for h in logging.root.handlers[:]:
             logging.root.removeHandler(h)
-        main()
+        main(strategy)
         cfg = Settings()
         # compute next day's start time
         tomorrow = date.today() + timedelta(days=1)
