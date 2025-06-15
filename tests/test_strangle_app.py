@@ -4,7 +4,7 @@ from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from datetime import time
 
-from apps.zero_dte_app import (
+from apps.zero_dte.zero_dte_app import (
     choose_otm_strangle_contracts,
     submit_strangle,
     monitor_and_exit_strangle,
@@ -39,11 +39,11 @@ def fake_chain():
 def test_choose_otm_strangle(monkeypatch, fake_chain):
     # stub option chain and underlying price
     monkeypatch.setattr(
-        "apps.zero_dte_app.TradingClient.get_option_contracts",
+        "apps.zero_dte.zero_dte_app.TradingClient.get_option_contracts",
         lambda self, req: fake_chain,
     )
     monkeypatch.setattr(
-        "apps.zero_dte_app.get_underlying_price",
+        "apps.zero_dte.zero_dte_app.get_underlying_price",
         lambda stock, s: 100.0,
     )
 
@@ -69,7 +69,7 @@ def test_submit_strangle(monkeypatch):
         return r
 
     monkeypatch.setattr(
-        "apps.zero_dte_app.TradingClient.submit_order", fake_submit
+        "apps.zero_dte.zero_dte_app.TradingClient.submit_order", fake_submit
     )
 
     resp = submit_strangle(trading=None, call_symbol="C1", put_symbol="P1", qty=2)
@@ -91,7 +91,7 @@ def test_monitor_and_exit_strangle(monkeypatch):
         return {"C1": DummyTrade(p), "P1": DummyTrade(p)}
 
     monkeypatch.setattr(
-        "apps.zero_dte_app.OptionHistoricalDataClient.get_option_latest_trade",
+        "apps.zero_dte.zero_dte_app.OptionHistoricalDataClient.get_option_latest_trade",
         fake_trade,
     )
     calls = []
@@ -107,7 +107,7 @@ def test_monitor_and_exit_strangle(monkeypatch):
         return r
 
     monkeypatch.setattr(
-        "apps.zero_dte_app.TradingClient.submit_order", fake_submit
+        "apps.zero_dte.zero_dte_app.TradingClient.submit_order", fake_submit
     )
 
     # entry_price_sum=2.0, target_pct=0.5 → target_sum=3.0
@@ -127,3 +127,88 @@ def test_monitor_and_exit_strangle(monkeypatch):
     exit_order = calls[0]
     assert exit_order.order_class == OrderClass.MLEG
     assert exit_order.legs[0].side == OrderSide.SELL
+
+
+def test_monitor_and_exit_strangle_retry(monkeypatch):
+    from requests.exceptions import RequestException
+    # Setup fake trade to raise once then succeed
+    call_log = []
+    prices = [2.0, 2.0]
+    def fake_trade(self, req):
+        if not call_log:
+            call_log.append('err')
+            raise RequestException('transient error')
+        return {
+            'C1': DummyTrade(prices.pop(0)),
+            'P1': DummyTrade(prices.pop(0)),
+        }
+    monkeypatch.setattr(
+        'apps.zero_dte.zero_dte_app.OptionHistoricalDataClient.get_option_latest_trade',
+        fake_trade,
+    )
+    # avoid delays
+    monkeypatch.setattr('apps.zero_dte.zero_dte_app.time.sleep', lambda _: None)
+    calls = []
+    def fake_submit(self, order_data):
+        calls.append(order_data)
+        class R: pass
+        r = R()
+        r.id = 'R'
+        r.status = 'filled'
+        return r
+    monkeypatch.setattr(
+        'apps.zero_dte.zero_dte_app.TradingClient.submit_order',
+        fake_submit,
+    )
+    # entry_price_sum=2.0, target_pct=0.5 → target_sum=3.0
+    monitor_and_exit_strangle(
+        trading=None,
+        option_client=None,
+        symbols=['C1', 'P1'],
+        entry_price_sum=2.0,
+        qty=1,
+        target_pct=0.5,
+        poll_interval=0.01,
+        exit_cutoff=time(23, 59),
+    )
+    assert call_log, "Expected at least one retry on transient error"
+    assert len(calls) == 1
+
+
+def test_monitor_and_exit_strangle_stop_loss(monkeypatch):
+    # Setup fake trade to always return low prices breaching stop-loss
+    def fake_trade(self, req):
+        return {
+            'C1': DummyTrade(0.5),
+            'P1': DummyTrade(0.5),
+        }
+    monkeypatch.setattr(
+        'apps.zero_dte.zero_dte_app.OptionHistoricalDataClient.get_option_latest_trade',
+        fake_trade,
+    )
+    monkeypatch.setattr('apps.zero_dte.zero_dte_app.time.sleep', lambda _: None)
+    calls = []
+    def fake_submit(self, order_data):
+        calls.append(order_data)
+        class R: pass
+        r = R()
+        r.id = 'S'
+        r.status = 'filled'
+        return r
+    monkeypatch.setattr(
+        'apps.zero_dte.zero_dte_app.TradingClient.submit_order',
+        fake_submit,
+    )
+    # entry_price_sum=2.0, stop_loss_pct=0.3 → stop_loss_sum=1.4, current_sum=1.0 breaches
+    monitor_and_exit_strangle(
+        trading=None,
+        option_client=None,
+        symbols=['C1', 'P1'],
+        entry_price_sum=2.0,
+        qty=1,
+        target_pct=0.5,
+        poll_interval=0.01,
+        exit_cutoff=time(23, 59),
+    )
+    assert len(calls) == 1
+
