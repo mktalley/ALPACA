@@ -12,9 +12,10 @@ import time
 import logging
 from datetime import date, datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
-from typing import Dict
+from typing import Dict, List
 import os
 import threading
+import signal  # for graceful shutdown
 import argparse
 # Configure timezone for Eastern Time logging
 os.environ['TZ'] = 'America/New_York'
@@ -68,30 +69,94 @@ from alpaca.data.timeframe import TimeFrame
 # Placeholder for two-phase strategy; will import dynamically in main or be stubbed in tests
 run_two_phase = None
 
+# Simple retry helper for external API calls with circuit breaker
+_failure_count = 0
+_circuit_open_until = 0.0
+
+def safe_api_call(func, *args, retries: int = 3, backoff: float = 1.0, **kwargs):
+    """Call func(*args, **kwargs) with retries, exponential backoff on exception, and circuit breaker on repeated failures."""
+    global _failure_count, _circuit_open_until
+    now = time.time()
+    # Circuit open: reject calls until cooldown expires
+    if now < _circuit_open_until:
+        raise RuntimeError(
+            f"Circuit is open until {datetime.fromtimestamp(_circuit_open_until)}; skipping API call {func.__name__}"
+        )
+    attempt = 0
+    while True:
+        try:
+            result = func(*args, **kwargs)
+        except Exception as e:
+            attempt += 1
+            if attempt > retries:
+                # after retry exhaustion, count a failure
+                _failure_count += 1
+                cfg = Settings()
+                threshold = getattr(cfg, 'FAILURE_THRESHOLD', 5)
+                cooldown = getattr(cfg, 'COOLDOWN_SEC', 300.0)
+                if _failure_count >= threshold:
+                    _circuit_open_until = now + cooldown
+                    logging.critical(
+                        "Circuit breaker tripped for %s: pausing API calls for %.1fs", func.__name__, cooldown
+                    )
+                logging.error("API call %s failed after %d attempts: %s", func.__name__, retries, e)
+                raise
+            delay = backoff * (2 ** (attempt - 1))
+            logging.warning(
+                "API call %s failed on attempt %d/%d: %s – retrying in %.1fs",
+                func.__name__, attempt, retries, e, delay,
+            )
+            time.sleep(delay)
+            continue
+        else:
+            # reset failure count on success
+            _failure_count = 0
+            return result
 
 
+# Global shutdown event
+type_shutdown = threading.Event()
+
+# Graceful shutdown handler
+def handle_signal(signum, frame):
+    logging.info("Received signal %s; shutting down gracefully...", signum)
+    type_shutdown.set()
+
+signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
 
 class Settings(BaseSettings):
     ALPACA_API_KEY: str
     ALPACA_API_SECRET: str
     PAPER: bool = True
 
-    UNDERLYING: str = Field("SPY", description="Underlying symbol to trade options on")
-    QTY: int = Field(5, description="Number of contracts per leg")
+    UNDERLYING: List[str] = Field(["SPY"], description="Comma-separated list of underlying symbols to trade options on")
+    @field_validator("UNDERLYING", mode="before")
+    def split_underlying(cls, v):
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        elif isinstance(v, list):
+            return v
+        else:
+            raise ValueError("UNDERLYING must be a string or list of strings")
+    QTY: int = Field(10, description="Number of contracts per leg")
     PROFIT_TARGET_PCT: float = Field(
-        0.50, description="Profit target as a percent of entry price (e.g. 0.5 = 50%)"
+        0.75, description="Profit target as a percent of entry price (e.g. 0.75 = 75%)"
     )
     POLL_INTERVAL: float = Field(120.0, description="Seconds between price checks")
     EXIT_CUTOFF: dt_time = Field(
         dt_time(22, 45), description="Hard exit time (wall clock) if target not hit"
     )
     STOP_LOSS_PCT: float = Field(
-        0.3, description="Max allowable loss as a percent of entry (e.g. 0.3 = 30%)"
+        0.20, description="Max allowable loss as a percent of entry (e.g. 0.20 = 20%)"
     )
     CONDOR_TARGET_PCT: float = Field(
         0.25, description="Profit target as a percent for the condor phase in two-phase strategy"
     )
-    MAX_TRADES: int = Field(10, description="Maximum number of strangle trades per day")
+    MAX_TRADES: int = Field(20, description="Maximum number of strangle trades per day")
+    EVENT_MOVE_PCT: float = Field(
+        0.0015, description="Price move percent to trigger event trades (e.g. 0.0015 = 0.15%)"
+    )
 
     TRADE_START: dt_time = Field(
         dt_time(9, 45), description="Earliest time to enter trades (ET)"
@@ -127,13 +192,15 @@ def setup_logging():
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)-8s %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        datefmt="%Y-%m-%d %H:%M:%S %Z%z",
         handlers=handlers
     )
 
 
 def get_underlying_price(stock_client: StockHistoricalDataClient, symbol: str) -> float:
-    resp = stock_client.get_stock_latest_trade(
+    """Fetch spot price with retries."""
+    resp = safe_api_call(
+        stock_client.get_stock_latest_trade,
         StockLatestTradeRequest(symbol_or_symbols=[symbol])
     )
     trade = resp[symbol]
@@ -432,6 +499,121 @@ def run_strangle(
         logging.error("Error in run_strangle: %s", e, exc_info=True)
 
 
+
+def schedule_for_symbol(
+    symbol: str,
+    cfg: Settings,
+    trading: TradingClient,
+    stock_hist: StockHistoricalDataClient,
+    option_hist: OptionHistoricalDataClient,
+    strategy: str,
+):
+    """Schedule and execute trades for a single symbol."""
+    logging.info("Scheduling trades for symbol %s", symbol)
+    # Prepare anchor times for today
+    today = date.today()
+    trade_start_dt = datetime.combine(today, cfg.TRADE_START)
+    trade_end_dt = datetime.combine(today, cfg.TRADE_END)
+    duration = trade_end_dt - trade_start_dt
+    anchors = [
+        trade_start_dt,
+        trade_start_dt + duration / 4,
+        trade_start_dt + duration / 2,
+        trade_start_dt + (3 * duration) / 4,
+        trade_end_dt,
+    ]
+    threads: list[threading.Thread] = []
+    trades_done = 0
+    # initial spot price
+    last_spot = get_underlying_price(stock_hist, symbol)
+    # Prepare common arguments tuple
+    common_args = (
+        trading,
+        stock_hist,
+        option_hist,
+        symbol,
+        cfg.QTY,
+        cfg.PROFIT_TARGET_PCT,
+        cfg.POLL_INTERVAL,
+        cfg.EXIT_CUTOFF,
+    )
+    # Determine thread target and args based on strategy
+    if strategy == "two_phase":
+        if run_two_phase is None:
+            from apps.zero_dte.two_phase import run_two_phase as _rp
+            globals()["run_two_phase"] = _rp
+        thread_target = run_two_phase
+        thread_args = common_args + (cfg.CONDOR_TARGET_PCT,)
+    else:
+        thread_target = run_strangle
+        thread_args = common_args
+    # Iterate through anchors and event triggers
+    for i, anchor in enumerate(anchors):
+        if type_shutdown.is_set() or trades_done >= cfg.MAX_TRADES:
+            break
+        now = datetime.now()
+        if now < anchor:
+            secs = (anchor - now).total_seconds()
+            logging.info(
+                "Symbol %s sleeping until anchor at %s",
+                symbol,
+                anchor.time(),
+            )
+            time.sleep(secs)
+            if type_shutdown.is_set():
+                break
+        logging.info(
+            "Symbol %s anchor trade #%d at %s",
+            symbol,
+            trades_done + 1,
+            anchor.time(),
+        )
+        t = threading.Thread(
+            target=thread_target,
+            args=thread_args,
+            daemon=True,
+        )
+        t.start()
+        threads.append(t)
+        trades_done += 1
+        # update spot price
+        last_spot = get_underlying_price(stock_hist, symbol)
+        # Event-triggered trades until next anchor
+        if i < len(anchors) - 1:
+            next_anchor = anchors[i + 1]
+            while (
+                not type_shutdown.is_set()
+                and trades_done < cfg.MAX_TRADES
+                and datetime.now() < next_anchor
+            ):
+                time.sleep(cfg.POLL_INTERVAL)
+                curr_spot = get_underlying_price(stock_hist, symbol)
+                if abs(curr_spot - last_spot) / last_spot >= cfg.EVENT_MOVE_PCT:
+                    logging.info(
+                        "Symbol %s price move triggered event trade #%d",
+                        symbol,
+                        trades_done + 1,
+                    )
+                    t = threading.Thread(
+                        target=thread_target,
+                        args=thread_args,
+                        daemon=True,
+                    )
+                    t.start()
+                    threads.append(t)
+                    trades_done += 1
+                    last_spot = curr_spot
+    # Wait for all threads to complete
+    for t in threads:
+        t.join()
+    logging.info(
+        "Symbol %s: all %d trades completed",
+        symbol,
+        trades_done,
+    )
+
+
+
 def main(strategy: str = "strangle"):
     setup_logging()
     cfg = Settings()
@@ -458,76 +640,31 @@ def main(strategy: str = "strangle"):
     clock = trading.get_clock()
     while not clock.is_open:
         logging.warning(
-            "Market is closed (next open at %s). Sleeping 60 seconds...",
+            "Market is closed (next open at %s). Sleeping 10 minutes...",
             clock.next_open.isoformat(),
         )
-        time.sleep(60)
+        time.sleep(600)
         clock = trading.get_clock()
-
-
-
-    # Hybrid scheduling: fixed anchor trades + event-triggered trades
-    today = date.today()
-    trade_start_dt = datetime.combine(today, cfg.TRADE_START)
-    trade_end_dt = datetime.combine(today, cfg.TRADE_END)
-    duration = trade_end_dt - trade_start_dt
-    quarter_dt = trade_start_dt + duration / 4
-    mid_dt = trade_start_dt + duration / 2
-    three_quarter_dt = trade_start_dt + (3 * duration) / 4
-
-    EVENT_MOVE_PCT = 0.0025  # Lowered to 0.25% move for more entries
-
-    threads: list[threading.Thread] = []
-    trades_done = 0
-    # initial spot price
-    last_spot = get_underlying_price(stock_hist, cfg.UNDERLYING)
-    # Prepare common arguments tuple for threads
-    common_args = (trading, stock_hist, option_hist, cfg.UNDERLYING, cfg.QTY, cfg.PROFIT_TARGET_PCT, cfg.POLL_INTERVAL, cfg.EXIT_CUTOFF)
-
-    # Determine thread target and args based on strategy
-    if strategy == "two_phase":
-        thread_target = run_two_phase
-        thread_args = common_args + (cfg.CONDOR_TARGET_PCT,)
-    else:
-        thread_target = run_strangle
-        thread_args = common_args
-
-
-    anchors = [trade_start_dt, quarter_dt, mid_dt, three_quarter_dt, trade_end_dt]  # Expanded anchor times
-    for i, anchor in enumerate(anchors):
-        if trades_done >= cfg.MAX_TRADES:
+    # Schedule trading tasks for each symbol
+    symbol_threads: list[threading.Thread] = []
+    for symbol in cfg.UNDERLYING:
+        if type_shutdown.is_set():
             break
-        now = datetime.now()
-        if now < anchor:
-            secs = (anchor - now).total_seconds()
-            logging.info("Sleeping until anchor trade #%d at %s", trades_done + 1, anchor.time())
-            time.sleep(secs)
-        logging.info("Anchor trade #%d at %s", trades_done + 1, anchor.time())
-        t = threading.Thread(target=thread_target, args=thread_args, daemon=True)
+        t = threading.Thread(
+            target=schedule_for_symbol,
+            args=(symbol, cfg, trading, stock_hist, option_hist, strategy),
+            daemon=True,
+        )
         t.start()
-        threads.append(t)
-        trades_done += 1
-        last_spot = get_underlying_price(stock_hist, cfg.UNDERLYING)
-
-        # Event-triggered trades until next anchor
-        if i < len(anchors) - 1:
-            next_anchor = anchors[i + 1]
-            while trades_done < cfg.MAX_TRADES and datetime.now() < next_anchor:
-                time.sleep(cfg.POLL_INTERVAL)
-                curr_spot = get_underlying_price(stock_hist, cfg.UNDERLYING)
-                pct_move = abs(curr_spot - last_spot) / last_spot
-                if pct_move >= EVENT_MOVE_PCT:
-                    logging.info("Price moved %.2f%%, triggering event trade #%d", pct_move * 100, trades_done + 1)
-                    t = threading.Thread(target=thread_target, args=thread_args, daemon=True)
-                    t.start()
-                    threads.append(t)
-                    trades_done += 1
-                    last_spot = curr_spot
-
-    # Wait for all strangle threads to complete
-    for t in threads:
+        symbol_threads.append(t)
+    # Wait for all per-symbol schedules to complete
+    for t in symbol_threads:
         t.join()
-    logging.info("All %d trades completed", trades_done)
+    logging.info("All symbols processed: %s", cfg.UNDERLYING)
+
+
+
+
 
 
 if __name__ == "__main__":
