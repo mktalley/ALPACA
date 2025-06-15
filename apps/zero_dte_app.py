@@ -123,7 +123,7 @@ def submit_buy(
         time_in_force=TimeInForce.DAY,
         legs=[leg],
     )
-    resp = trading.submit_order(order_data=order)
+    resp = TradingClient.submit_order(trading, order)
     logging.info("Submitted BUY order %s; status=%s", resp.id, resp.status)
     return resp
 
@@ -174,9 +174,8 @@ def submit_strangle(
     )
     put_leg = OptionLegRequest(
         symbol=put_symbol,
-        qty=qty,
+        ratio_qty=qty,
         side=OrderSide.BUY,
-        time_in_force=TimeInForce.DAY,
     )
     order = MarketOrderRequest(
         qty=qty,
@@ -184,7 +183,7 @@ def submit_strangle(
         order_class=OrderClass.MLEG,
         legs=[call_leg, put_leg],
     )
-    resp = trading.submit_order(order_data=order)
+    resp = TradingClient.submit_order(trading, order)
     logging.info("Submitted STRANGLE BUY order %s; status=%s", resp.id, resp.status)
     return resp
 
@@ -215,7 +214,7 @@ def monitor_and_exit_strangle(
             break
         prices = []
         for sym in symbols:
-            trade = option_client.get_option_latest_trade(
+            trade = OptionHistoricalDataClient.get_option_latest_trade(option_client, 
                 OptionLatestTradeRequest(symbol_or_symbols=[sym])
             )[sym]
             prices.append(float(trade.price))
@@ -228,7 +227,7 @@ def monitor_and_exit_strangle(
 
     # exit legs
     legs = [
-        OptionLegRequest(symbol=sym, qty=qty, side=OrderSide.SELL, time_in_force=TimeInForce.DAY)
+        OptionLegRequest(symbol=sym, ratio_qty=qty, side=OrderSide.SELL)
         for sym in symbols
     ]
     exit_order = MarketOrderRequest(
@@ -237,7 +236,7 @@ def monitor_and_exit_strangle(
         order_class=OrderClass.MLEG,
         legs=legs,
     )
-    resp = trading.submit_order(order_data=exit_order)
+    resp = TradingClient.submit_order(trading, exit_order)
     logging.info("Submitted STRANGLE SELL exit order %s; status=%s", resp.id, resp.status)
     return resp
 
@@ -266,7 +265,7 @@ def monitor_and_exit(
             logging.warning("Cutoff time reached (%s). Exiting...", exit_cutoff)
             break
 
-        trade = option_client.get_option_latest_trade(
+        trade = OptionHistoricalDataClient.get_option_latest_trade(option_client, 
             OptionLatestTradeRequest(symbol_or_symbols=[entry_symbol])
         )[entry_symbol]
         current = float(trade.price)
@@ -290,7 +289,7 @@ def monitor_and_exit(
         time_in_force=TimeInForce.DAY,
         legs=[leg],
     )
-    resp = trading.submit_order(order_data=exit_order)
+    resp = TradingClient.submit_order(trading, exit_order)
     logging.info("Submitted SELL exit order %s; status=%s", resp.id, resp.status)
     return resp
 
