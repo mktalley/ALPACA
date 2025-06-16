@@ -1,4 +1,13 @@
 #!/usr/bin/env python3
+import sys
+import os
+# Ensure project root is on PYTHONPATH so the 'alpaca' package is importable
+file_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(file_dir, os.pardir, os.pardir))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+
 """
 0DTE OTM Strangle (Call + Put) & Target-Exit Example
 Designed for institutional clients:
