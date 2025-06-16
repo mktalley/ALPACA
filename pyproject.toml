@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "alpaca-py"
 # placeholder for poetry-dynamic-versioning
-version = "0.0.0"
+version = "0.1.0"
 description = "The Official Python SDK for Alpaca APIs"
 authors = [
     "Rahul Chowdhury <rahul.chowdhury@alpaca.markets>",
