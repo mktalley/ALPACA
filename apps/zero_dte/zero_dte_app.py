@@ -126,8 +126,8 @@ signal.signal(signal.SIGINT, handle_signal)
 signal.signal(signal.SIGTERM, handle_signal)
 
 class Settings(BaseSettings):
-    ALPACA_API_KEY: str
-    ALPACA_API_SECRET: str
+    ALPACA_API_KEY: str = ""
+    ALPACA_API_SECRET: str = ""
     PAPER: bool = True
 
     UNDERLYING: List[str] = Field(["SPY"], description="Comma-separated list of underlying symbols to trade options on")
@@ -299,6 +299,98 @@ def choose_otm_strangle_contracts(
     # nearest OTM
     call = min(calls, key=lambda c: st(c) - spot)
     put = min(puts, key=lambda p: spot - st(p))
+
+
+def choose_iron_condor_contracts(
+    trading: TradingClient,
+    stock_client: StockHistoricalDataClient,
+    symbol: str,
+    wing_spread: int,
+) -> tuple[str, str, str, str]:
+    """
+    Fetch today’s option chain and build an iron condor with defined risk.
+    Returns symbols for short call, short put, long call, long put.
+    """
+    today = date.today().isoformat()
+    opt_resp = TradingClient.get_option_contracts(
+        trading,
+        GetOptionContractsRequest(
+            underlying_symbols=[symbol],
+            expiration_date=today,
+            limit=500,
+        ),
+    )
+    if isinstance(opt_resp, list):
+        chain = opt_resp
+    else:
+        chain = opt_resp.option_contracts or []
+    spot = get_underlying_price(stock_client, symbol)
+
+    # normalize contract type and strike attributes
+    def ct(c):
+        if hasattr(c, 'contract_type'):
+            return c.contract_type
+        t = getattr(c, 'type', None)
+        return t.value if hasattr(t, 'value') else t
+
+    def st(c):
+        if hasattr(c, 'strike'):
+            return c.strike
+        return getattr(c, 'strike_price', 0)
+
+    # separate OTM calls and puts
+    calls = sorted([c for c in chain if ct(c) == 'call' and st(c) > spot], key=lambda c: st(c))
+    puts = sorted([p for p in chain if ct(p) == 'put' and st(p) < spot], key=lambda p: st(p), reverse=True)
+    # ensure enough strikes for wings
+    if len(calls) <= wing_spread or len(puts) <= wing_spread:
+        raise RuntimeError(f"Insufficient strikes to build iron condor for {symbol}")
+
+    short_call = calls[0]
+    long_call = calls[wing_spread]
+    short_put = puts[0]
+    long_put = puts[wing_spread]
+    logging.info(
+        "Iron condor for %s: short_call=%s, short_put=%s, long_call=%s, long_put=%s",
+        symbol,
+        short_call.symbol,
+        short_put.symbol,
+        long_call.symbol,
+        long_put.symbol,
+    )
+    return short_call.symbol, short_put.symbol, long_call.symbol, long_put.symbol
+
+
+def submit_iron_condor(
+    trading: TradingClient,
+    short_call: str,
+    short_put: str,
+    long_call: str,
+    long_put: str,
+    qty: int,
+) -> object:
+    """
+    Submit a defined-risk iron condor (sell short call/put, buy wings).
+    """
+    legs = [
+        OptionLegRequest(symbol=short_call, ratio_qty=1, side=OrderSide.SELL),
+        OptionLegRequest(symbol=short_put, ratio_qty=1, side=OrderSide.SELL),
+        OptionLegRequest(symbol=long_call, ratio_qty=1, side=OrderSide.BUY),
+        OptionLegRequest(symbol=long_put, ratio_qty=1, side=OrderSide.BUY),
+    ]
+    order = MarketOrderRequest(
+        qty=qty,
+        time_in_force=TimeInForce.DAY,
+        order_class=OrderClass.MLEG,
+        legs=legs,
+    )
+    resp = TradingClient.submit_order(trading, order)
+    logging.info(
+        "Submitted IRON CONDOR entry order %s; status=%s",
+        getattr(resp, 'id', None),
+        getattr(resp, 'status', None),
+    )
+    return resp
+
     logging.info(
         "OTM Strangle for %s: call %s (@%.2f) & put %s (@%.2f)",
         symbol, call.symbol, st(call), put.symbol, st(put)
