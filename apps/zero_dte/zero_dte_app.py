@@ -162,6 +162,10 @@ class Settings(BaseSettings):
     CONDOR_TARGET_PCT: float = Field(
         0.25, description="Profit target as a percent for the condor phase in two-phase strategy"
     )
+    CONDOR_WING_SPREAD: int = Field(
+        2, description="Wing width in strikes for the condor phase"
+    )
+
     MAX_TRADES: int = Field(20, description="Maximum number of strangle trades per day")
     EVENT_MOVE_PCT: float = Field(
         0.0015, description="Price move percent to trigger event trades (e.g. 0.0015 = 0.15%)"
