@@ -21,6 +21,7 @@ Designed for institutional clients:
 
 import time
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from datetime import date, datetime, time as dt_time, timedelta
 from zoneinfo import ZoneInfo
 from typing import Dict, List
@@ -167,11 +168,18 @@ def _execute_trade_and_update(target, args, cfg) -> None:
             drawdown_pct = -daily_pnl / daily_start_equity
             if drawdown_pct >= cfg.DAILY_DRAWDOWN_PCT:
                 logging.critical(
-                    "Daily drawdown exceeded %.2f%% (%.2f / %.2f); shutting down.",
+                    "Daily drawdown exceeded %.2f%% (%.2f / %.2f); initiating shutdown and liquidation.",
                     cfg.DAILY_DRAWDOWN_PCT * 100,
                     -daily_pnl,
                     daily_start_equity,
                 )
+                # Liquidate all open positions immediately
+                try:
+                    trading_client = args[0]
+                    trading_client.close_all_positions()
+                    logging.info("All open positions closed due to drawdown limit.")
+                except Exception as e:
+                    logging.error("Error closing positions on drawdown: %s", e, exc_info=True)
                 type_shutdown.set()
     except Exception as e:
         logging.error("Error executing trade %s: %s", target.__name__, e, exc_info=True)
@@ -183,6 +191,19 @@ def handle_signal(signum, frame):
 
 signal.signal(signal.SIGINT, handle_signal)
 signal.signal(signal.SIGTERM, handle_signal)
+
+class Settings(BaseSettings):
+    
+    @model_validator(mode='after')
+    def validate_thresholds(cls, values):
+        """
+        Ensure STOP_LOSS_PCT is less than PROFIT_TARGET_PCT and RISK_PCT_PER_TRADE is between 0 and 1.
+        """
+        if values.STOP_LOSS_PCT >= values.PROFIT_TARGET_PCT:
+            raise ValueError(f"STOP_LOSS_PCT ({values.STOP_LOSS_PCT}) must be less than PROFIT_TARGET_PCT ({values.PROFIT_TARGET_PCT})")
+        if not (0 < values.RISK_PCT_PER_TRADE < 1):
+            raise ValueError(f"RISK_PCT_PER_TRADE ({values.RISK_PCT_PER_TRADE}) must be between 0 and 1")
+        return values
 
 class Settings(BaseSettings):
     DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
@@ -248,21 +269,30 @@ class Settings(BaseSettings):
 
 
 def setup_logging():
-    # Rotate logs daily by writing to a date-stamped file in logs/
+    # Rotate logs daily to a static file with 7-day retention
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     logs_dir = os.path.join(root, 'logs')
     os.makedirs(logs_dir, exist_ok=True)
-    # Filename is the trading date (YYYY-MM-DD).log
-    log_filename = date.today().isoformat() + '.log'
-    log_path = os.path.join(logs_dir, log_filename)
+    log_path = os.path.join(logs_dir, 'zero_dte.log')
+    # Timed rotating handler: rotate at midnight, keep 7 days of logs
+    file_handler = TimedRotatingFileHandler(
+        filename=log_path,
+        when='midnight',
+        interval=1,
+        backupCount=7,
+        encoding='utf-8'
+    )
+    file_handler.suffix = "%Y-%m-%d"
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S %Z%z"
+    ))
     handlers = [
         logging.StreamHandler(),
-        logging.FileHandler(log_path)
+        file_handler
     ]
     logging.basicConfig(
-        level=logging.DEBUG,  # verbose logging for detailed analysis
-        format="%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S %Z%z",
+        level=logging.DEBUG,
         handlers=handlers
     )
 
@@ -852,7 +882,7 @@ def schedule_for_symbol(
 
 
 
-def main(strategy: str = "two_phase"):
+def main(strategy: str = "two_phase", auto_reenter: bool = False):
     setup_logging()
     cfg = Settings()
     logging.info(
@@ -957,19 +987,31 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--strategy", choices=["strangle", "two_phase"], default="two_phase",
                         help="Trading strategy to run: single-phase strangle or two-phase flip")
+    parser.add_argument("--auto-reenter", action="store_true",
+                        help="Enable automatic re-entry of a new trading cycle on drawdown shutdown.")
     args = parser.parse_args()
     strategy = args.strategy
+    auto_reenter = args.auto_reenter
+
+    # Outer loop: run trading cycles for each day
     while True:
-        # clear existing handlers so logging resets each day
-        for h in logging.root.handlers[:]:
-            logging.root.removeHandler(h)
-        main(strategy)
-        # Perform end-of-day log analysis and recommendations
+        # Immediate re-entry loop: repeat main() if shutdown triggered by drawdown
+        while True:
+            # Reset log handlers so setup_logging can reconfigure
+            for h in logging.root.handlers[:]:
+                logging.root.removeHandler(h)
+            main(strategy)
+            if not auto_reenter or not type_shutdown.is_set():
+                break
+            logging.info("Auto-reenter enabled: restarting trading cycle with fresh PnL and equity.")
+            type_shutdown.clear()
+        # End-of-day analysis
         analyze_logs_for_date(date.today())
+        # Calculate sleep until next trading day
         cfg = Settings()
-        # compute next day's start time
         tomorrow = date.today() + timedelta(days=1)
         next_start = datetime.combine(tomorrow, cfg.TRADE_START)
         secs = (next_start - datetime.now()).total_seconds()
         logging.info("Sleeping until next trading day start at %s (%.0f seconds)", next_start, secs)
         time.sleep(secs)
+
