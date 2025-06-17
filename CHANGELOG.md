@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.1] - 2025-06-17
+
+- Remove duplicate `submit_strangle` call in `run_strangle`.
+- Add `RISK_PCT_PER_TRADE` to `apps/zero_dte/.env.example`.
+- Update `zero_dte_app.py` documentation to reference dynamic sizing env var and updated `.env.example` path.
+
 ## [0.1.0] - 2025-06-15
 
 - Add configurable iron-condor wing spread (`CONDOR_WING_SPREAD`).
