@@ -31,6 +31,7 @@ import re  # regex for log analysis
 os.environ['TZ'] = 'America/New_York'
 time.tzset()
 daily_pnl: float = 0.0  # cumulative P&L for the trading day
+daily_start_equity: float = 0.0  # starting equity for the trading day
 
 import pydantic
 from pydantic import SecretStr
@@ -158,6 +159,12 @@ def _execute_trade_and_update(target, args, cfg: Settings) -> None:
             logging.warning("Trade %s returned non-numeric result: %s", target.__name__, result)
             return
         _update_daily_pnl(pnl_val, cfg)
+    # Check percent drawdown circuit breaker
+    if daily_start_equity > 0:
+        drawdown_pct = -daily_pnl / daily_start_equity
+        if drawdown_pct >= cfg.DAILY_DRAWDOWN_PCT:
+            logging.critical("Daily drawdown exceeded %.2f%% (%.2f / %.2f); shutting down.", cfg.DAILY_DRAWDOWN_PCT * 100, -daily_pnl, daily_start_equity)
+            type_shutdown.set()
     except Exception as e:
         logging.error("Error executing trade %s: %s", target.__name__, e, exc_info=True)
 
@@ -171,6 +178,7 @@ signal.signal(signal.SIGTERM, handle_signal)
 class Settings(BaseSettings):
     DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
     DAILY_LOSS_LIMIT:    float = Field(0.0, description="Stop trading once we’ve lost $X today (0 to disable)")
+    DAILY_DRAWDOWN_PCT: float = Field(0.03, description="Stop trading if cumulative drawdown >= X% of starting equity")
 
     ALPACA_API_KEY: str = ""
     ALPACA_API_SECRET: str = ""
@@ -795,6 +803,15 @@ def main(strategy: str = "two_phase"):
     trading = TradingClient(
         cfg.ALPACA_API_KEY, cfg.ALPACA_API_SECRET, paper=cfg.PAPER
     )
+    # Initialize daily P&L and starting equity (percent drawdown circuit breaker)
+    global daily_pnl, daily_start_equity
+    daily_pnl = 0.0
+    try:
+        account = trading.get_account()
+        daily_start_equity = float(account.equity)
+        logging.info("Starting equity for today: %.2f", daily_start_equity)
+    except Exception as e:
+        logging.warning("Unable to fetch starting equity: %s", e)
     stock_hist = StockHistoricalDataClient(
         api_key=cfg.ALPACA_API_KEY,
         secret_key=cfg.ALPACA_API_SECRET,
