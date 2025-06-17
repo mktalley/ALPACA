@@ -59,7 +59,7 @@ except Exception:
 
 
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
