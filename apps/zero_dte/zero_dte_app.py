@@ -189,8 +189,6 @@ def handle_signal(signum, frame):
     logging.info("Received signal %s; shutting down gracefully...", signum)
     type_shutdown.set()
 
-signal.signal(signal.SIGINT, handle_signal)
-signal.signal(signal.SIGTERM, handle_signal)
 
 class Settings(BaseSettings):
     
@@ -993,6 +991,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     strategy = args.strategy
     auto_reenter = args.auto_reenter
+    # Register signal handlers in main thread
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
+
 
     # Outer loop: run trading cycles for each day
     while True:
