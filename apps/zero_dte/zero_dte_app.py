@@ -26,9 +26,12 @@ import os
 import threading
 import signal  # for graceful shutdown
 import argparse
+import re  # regex for log analysis
 # Configure timezone for Eastern Time logging
 os.environ['TZ'] = 'America/New_York'
 time.tzset()
+daily_pnl: float = 0.0  # cumulative P&L for the trading day
+
 import pydantic
 from pydantic import SecretStr
 # Workaround: alias Secret to SecretStr so pydantic-settings can import Secret
@@ -126,7 +129,38 @@ def safe_api_call(func, *args, retries: int = 3, backoff: float = 1.0, **kwargs)
 # Global shutdown event
 type_shutdown = threading.Event()
 
+# Helper to update and check daily P&L thresholds
+def _update_daily_pnl(pnl: float, cfg: Settings) -> None:
+    global daily_pnl
+    daily_pnl += pnl
+    logging.info("Updated DAILY P&L: %.4f", daily_pnl)
+    # Check thresholds
+    if cfg.DAILY_PROFIT_TARGET > 0 and daily_pnl >= cfg.DAILY_PROFIT_TARGET:
+        logging.info("Daily profit target reached (%.4f >= %.4f); shutting down further trades.", daily_pnl, cfg.DAILY_PROFIT_TARGET)
+        type_shutdown.set()
+    if cfg.DAILY_LOSS_LIMIT > 0 and daily_pnl <= -cfg.DAILY_LOSS_LIMIT:
+        logging.info("Daily loss limit reached (%.4f <= -%.4f); shutting down further trades.", daily_pnl, cfg.DAILY_LOSS_LIMIT)
+        type_shutdown.set()
+
 # Graceful shutdown handler
+
+# Wrapper to execute trade function and update daily P&L
+def _execute_trade_and_update(target, args, cfg: Settings) -> None:
+    logging.info("Executing trade %s with args %s", target.__name__, args)
+    try:
+        result = target(*args)
+        if result is None:
+            logging.warning("Trade %s returned None; cannot compute P&L", target.__name__)
+            return
+        try:
+            pnl_val = float(result)
+        except (TypeError, ValueError):
+            logging.warning("Trade %s returned non-numeric result: %s", target.__name__, result)
+            return
+        _update_daily_pnl(pnl_val, cfg)
+    except Exception as e:
+        logging.error("Error executing trade %s: %s", target.__name__, e, exc_info=True)
+
 def handle_signal(signum, frame):
     logging.info("Received signal %s; shutting down gracefully...", signum)
     type_shutdown.set()
@@ -135,6 +169,9 @@ signal.signal(signal.SIGINT, handle_signal)
 signal.signal(signal.SIGTERM, handle_signal)
 
 class Settings(BaseSettings):
+    DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
+    DAILY_LOSS_LIMIT:    float = Field(0.0, description="Stop trading once we’ve lost $X today (0 to disable)")
+
     ALPACA_API_KEY: str = ""
     ALPACA_API_SECRET: str = ""
     PAPER: bool = True
@@ -203,11 +240,13 @@ def setup_logging():
         logging.FileHandler(log_path)
     ]
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(message)s",
+        level=logging.DEBUG,  # verbose logging for detailed analysis
+        format="%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S %Z%z",
         handlers=handlers
     )
+
+
 
 
 def get_underlying_price(stock_client: StockHistoricalDataClient, symbol: str) -> float:
@@ -498,7 +537,28 @@ def monitor_and_exit_strangle(
     )
     resp = TradingClient.submit_order(trading, exit_order)
     logging.info("Submitted STRANGLE SELL exit order %s; status=%s", resp.id, resp.status)
-    return resp
+    # Wait for exit fills and compute P&L
+    exit_start = time.time()
+    exit_fill_timeout = 30
+    exit_prices: list[float] = []
+    for leg in resp.legs:
+        leg_id = leg.id
+        logging.info("Waiting for fill on exit leg %s", leg_id)
+        while True:
+            current_leg = trading.get_order_by_id(leg_id)
+            avg = getattr(current_leg, 'filled_avg_price', None)
+            if avg is not None and float(avg) > 0:
+                exit_prices.append(float(avg))
+                logging.info("Exit leg %s filled at %.4f", leg_id, float(avg))
+                break
+            if time.time() - exit_start > exit_fill_timeout:
+                logging.error("Timeout waiting for fill on exit leg %s", leg_id)
+                break
+            time.sleep(1)
+    exit_price_sum = sum(exit_prices)
+    pnl = exit_price_sum - entry_price_sum
+    logging.info("Trade exit prices %s → exit_price_sum=%.4f; entry_sum=%.4f; P&L=%.4f", exit_prices, exit_price_sum, entry_price_sum, pnl)
+    return pnl
 
 def monitor_and_exit(
     trading: TradingClient,
@@ -590,7 +650,7 @@ def run_strangle(
                 time.sleep(1)
         entry_price_sum = sum(filled_prices)
         logging.info("Entry prices %s → entry_price_sum=%.4f", filled_prices, entry_price_sum)
-        monitor_and_exit_strangle(
+        pnl = monitor_and_exit_strangle(
             trading,
             option_client,
             symbols=[call_sym, put_sym],
@@ -600,6 +660,8 @@ def run_strangle(
             poll_interval=poll_interval,
             exit_cutoff=exit_cutoff,
         )
+        logging.info("Strangle complete for %s; PnL=%.4f", symbol, pnl)
+        return pnl
     except Exception as e:
         logging.error("Error in run_strangle: %s", e, exc_info=True)
 
@@ -674,8 +736,8 @@ def schedule_for_symbol(
             anchor.time(),
         )
         t = threading.Thread(
-            target=thread_target,
-            args=thread_args,
+            target=_execute_trade_and_update,
+            args=(thread_target, thread_args, cfg),
             daemon=True,
         )
         t.start()
@@ -699,15 +761,17 @@ def schedule_for_symbol(
                         symbol,
                         trades_done + 1,
                     )
+                    # Schedule event-triggered trade
                     t = threading.Thread(
-                        target=thread_target,
-                        args=thread_args,
+                        target=_execute_trade_and_update,
+                        args=(thread_target, thread_args, cfg),
                         daemon=True,
                     )
                     t.start()
                     threads.append(t)
                     trades_done += 1
                     last_spot = curr_spot
+
     # Wait for all threads to complete
     for t in threads:
         t.join()
@@ -719,7 +783,7 @@ def schedule_for_symbol(
 
 
 
-def main(strategy: str = "strangle"):
+def main(strategy: str = "two_phase"):
     setup_logging()
     cfg = Settings()
     logging.info(
@@ -767,6 +831,45 @@ def main(strategy: str = "strangle"):
         t.join()
     logging.info("All symbols processed: %s", cfg.UNDERLYING)
 
+def analyze_logs_for_date(trading_date: date):
+    """
+    Read the log file for the given trading date, summarize key metrics, and log recommendations.
+    """
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    log_path = os.path.join(root, 'logs', f"{trading_date.isoformat()}.log")
+    try:
+        lines = open(log_path).read().splitlines()
+    except FileNotFoundError:
+        logging.warning("Log file not found for analysis: %s", log_path)
+        return
+    errors = [ln for ln in lines if "ERROR" in ln]
+    pnls = []
+    for ln in lines:
+        
+        m = re.search(r"PnL=([-+]?\d+\.\d+)", ln)
+        if m:
+            pnls.append(float(m.group(1)))
+    total_trades = len(pnls)
+    total_pnl = sum(pnls)
+    avg_pnl = total_pnl / total_trades if total_trades else 0.0
+    logging.info(
+        "End-of-day analysis for %s: trades=%d, total_PnL=%.2f, avg_PnL=%.2f",
+        trading_date.isoformat(), total_trades, total_pnl, avg_pnl
+    )
+    if errors:
+        logging.warning("Errors encountered during trading day (%d):", len(errors))
+        for e in errors:
+            logging.warning("%s", e)
+        logging.info("Recommendation: Investigate errors and add resilience (retries, exception handling).")
+    if avg_pnl < 0:
+        logging.info(
+            "Recommendation: Strategy resulted in negative average PnL (%.2f). Consider adjusting targets or filters.",
+            avg_pnl
+        )
+    else:
+        logging.info("Recommendation: Strategy yielded positive average PnL. Continue monitoring and fine-tuning thresholds.")
+
+
 
 
 
@@ -774,7 +877,7 @@ def main(strategy: str = "strangle"):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--strategy", choices=["strangle", "two_phase"], default="strangle",
+    parser.add_argument("--strategy", choices=["strangle", "two_phase"], default="two_phase",
                         help="Trading strategy to run: single-phase strangle or two-phase flip")
     args = parser.parse_args()
     strategy = args.strategy
@@ -783,6 +886,8 @@ if __name__ == "__main__":
         for h in logging.root.handlers[:]:
             logging.root.removeHandler(h)
         main(strategy)
+        # Perform end-of-day log analysis and recommendations
+        analyze_logs_for_date(date.today())
         cfg = Settings()
         # compute next day's start time
         tomorrow = date.today() + timedelta(days=1)
