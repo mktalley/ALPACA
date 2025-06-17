@@ -178,7 +178,7 @@ signal.signal(signal.SIGTERM, handle_signal)
 class Settings(BaseSettings):
     DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
     DAILY_LOSS_LIMIT:    float = Field(0.0, description="Stop trading once we’ve lost $X today (0 to disable)")
-    DAILY_DRAWDOWN_PCT: float = Field(0.03, description="Stop trading if cumulative drawdown >= X% of starting equity")
+    DAILY_DRAWDOWN_PCT: float = Field(0.05, description="Stop trading if cumulative drawdown >= X% of starting equity (default 5%)")
 
     ALPACA_API_KEY: str = ""
     ALPACA_API_SECRET: str = ""
