@@ -59,7 +59,7 @@ except Exception:
 
 
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
@@ -269,31 +269,32 @@ class Settings(BaseSettings):
 
 
 def setup_logging():
-    # Rotate logs daily to a static file with 7-day retention
+    # Log to a dated file and to console with timestamps (incl. milliseconds)
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     logs_dir = os.path.join(root, 'logs')
     os.makedirs(logs_dir, exist_ok=True)
-    log_path = os.path.join(logs_dir, 'zero_dte.log')
-    # Timed rotating handler: rotate at midnight, keep 7 days of logs
-    file_handler = TimedRotatingFileHandler(
+    # File name stamped with today's date
+    today_str = date.today().isoformat()
+    log_path = os.path.join(logs_dir, f"{today_str}.log")
+
+    # Formatter with date & time including milliseconds
+    formatter = logging.Formatter(
+        "%(asctime)s.%(msecs)03d %(levelname)-8s [%(threadName)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    # Console handler
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    # File handler
+    file_handler = logging.FileHandler(
         filename=log_path,
-        when='midnight',
-        interval=1,
-        backupCount=7,
         encoding='utf-8'
     )
-    file_handler.suffix = "%Y-%m-%d"
-    file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S %Z%z"
-    ))
-    handlers = [
-        logging.StreamHandler(),
-        file_handler
-    ]
+    file_handler.setFormatter(formatter)
+
     logging.basicConfig(
         level=logging.DEBUG,
-        handlers=handlers
+        handlers=[stream_handler, file_handler]
     )
 
 
