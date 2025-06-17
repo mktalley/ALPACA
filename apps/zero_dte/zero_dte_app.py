@@ -189,8 +189,7 @@ def handle_signal(signum, frame):
     logging.info("Received signal %s; shutting down gracefully...", signum)
     type_shutdown.set()
 
-signal.signal(signal.SIGINT, handle_signal)
-signal.signal(signal.SIGTERM, handle_signal)
+
 
 class Settings(BaseSettings):
     
@@ -813,63 +812,54 @@ def schedule_for_symbol(
     else:
         thread_target = run_strangle
         thread_args = common_args
-    # Iterate through anchors and event triggers
-    for i, anchor in enumerate(anchors):
-        if type_shutdown.is_set() or trades_done >= cfg.MAX_TRADES:
-            break
+    # Continuous polling for anchors and event-triggered trades
+    next_anchor_idx = next((idx for idx, t in enumerate(anchors) if t >= datetime.now()), len(anchors) - 1)
+    while not type_shutdown.is_set() and trades_done < cfg.MAX_TRADES:
         now = datetime.now()
-        if now < anchor:
-            secs = (anchor - now).total_seconds()
+        # Anchor scheduling
+        if next_anchor_idx < len(anchors) and now >= anchors[next_anchor_idx]:
+            anchor = anchors[next_anchor_idx]
             logging.info(
-                "Symbol %s sleeping until anchor at %s",
+                "Symbol %s anchor trade #%d at %s",
                 symbol,
+                trades_done + 1,
                 anchor.time(),
             )
-            time.sleep(secs)
-            if type_shutdown.is_set():
+            t = threading.Thread(
+                target=_execute_trade_and_update,
+                args=(thread_target, thread_args, cfg),
+                daemon=True,
+            )
+            t.start()
+            threads.append(t)
+            trades_done += 1
+            # update spot price
+            last_spot = get_underlying_price(stock_hist, symbol)
+            next_anchor_idx += 1
+            # If final anchor fired, exit scheduling loop
+            if next_anchor_idx >= len(anchors):
                 break
-        logging.info(
-            "Symbol %s anchor trade #%d at %s",
-            symbol,
-            trades_done + 1,
-            anchor.time(),
-        )
-        t = threading.Thread(
-            target=_execute_trade_and_update,
-            args=(thread_target, thread_args, cfg),
-            daemon=True,
-        )
-        t.start()
-        threads.append(t)
-        trades_done += 1
-        # update spot price
-        last_spot = get_underlying_price(stock_hist, symbol)
-        # Event-triggered trades until next anchor
-        if i < len(anchors) - 1:
-            next_anchor = anchors[i + 1]
-            while (
-                not type_shutdown.is_set()
-                and trades_done < cfg.MAX_TRADES
-                and datetime.now() < next_anchor
-            ):
-                time.sleep(cfg.POLL_INTERVAL)
-                curr_spot = get_underlying_price(stock_hist, symbol)
-                if abs(curr_spot - last_spot) / last_spot >= cfg.EVENT_MOVE_PCT:
-                    logging.info(
-                        "Symbol %s price move triggered event trade #%d",
-                        symbol,
-                        trades_done + 1,
-                    )
-                    # Schedule event-triggered trade
-                    t = threading.Thread(
-                        target=_execute_trade_and_update,
-                        args=(thread_target, thread_args, cfg),
-                        daemon=True,
-                    )
-                    t.start()
-                    threads.append(t)
-                    trades_done += 1
-                    last_spot = curr_spot
+            continue
+        # Event-triggered trades between anchors
+        if next_anchor_idx < len(anchors):
+            curr_spot = get_underlying_price(stock_hist, symbol)
+            if abs(curr_spot - last_spot) / last_spot >= cfg.EVENT_MOVE_PCT:
+                logging.info(
+                    "Symbol %s price move triggered event trade #%d",
+                    symbol,
+                    trades_done + 1,
+                )
+                t = threading.Thread(
+                    target=_execute_trade_and_update,
+                    args=(thread_target, thread_args, cfg),
+                    daemon=True,
+                )
+                t.start()
+                threads.append(t)
+                trades_done += 1
+                last_spot = curr_spot
+        time.sleep(cfg.POLL_INTERVAL)
+
 
     # Wait for all threads to complete
     for t in threads:
@@ -992,6 +982,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     strategy = args.strategy
     auto_reenter = args.auto_reenter
+
+    # Register signal handlers in main thread
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
 
     # Outer loop: run trading cycles for each day
     while True:
