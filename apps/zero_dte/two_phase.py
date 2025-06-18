@@ -15,7 +15,7 @@ from alpaca.trading.enums import OrderSide, OrderClass, TimeInForce
 from alpaca.trading.requests import OptionLegRequest, MarketOrderRequest
 
 # Import Settings for stop-loss percentage
-from apps.zero_dte.zero_dte_app import Settings
+from apps.zero_dte.zero_dte_app import Settings, daily_start_equity, type_shutdown
 
 
 def monitor_and_exit_condor(
@@ -42,6 +42,27 @@ def monitor_and_exit_condor(
     )
 
     while True:
+        # Portfolio-level profit percent fail-safe
+        try:
+            account = TradingClient.get_account(trading)
+            equity = float(account.equity)
+            if cfg.DAILY_PROFIT_PCT > 0 and daily_start_equity > 0:
+                pct = (equity - daily_start_equity) / daily_start_equity
+                if pct >= cfg.DAILY_PROFIT_PCT:
+                    logging.critical(
+                        "Daily profit percent target hit: %.2f%% >= %.2f%%; liquidating all positions.",
+                        pct * 100,
+                        cfg.DAILY_PROFIT_PCT * 100,
+                    )
+                    try:
+                        trading.close_all_positions()
+                        logging.info("All open positions closed due to daily profit percent target.")
+                    except Exception as e:
+                        logging.error("Error during portfolio liquidation: %s", e, exc_info=True)
+                    type_shutdown.set()
+                    return False
+        except Exception as e:
+            logging.warning("Error checking daily profit percent: %s", e)
         now = datetime.now()
         if now.time() >= exit_cutoff:
             logging.warning("Cutoff time reached (%s). Exiting condor monitor.", exit_cutoff)
@@ -81,6 +102,30 @@ def monitor_and_exit_condor(
         time.sleep(poll_interval)
 
     # Build exit order: reverse all legs
+      # Determine actual filled quantities per leg and cap exit qty
+      try:
+          pos_qtys = []
+          for sym in symbols:
+              pos = trading.get_position(sym)
+              pos_qtys.append(int(float(pos.qty)))
+          close_qty = min(pos_qtys) if pos_qtys else 0
+      except Exception as e:
+          logging.warning("Error fetching positions for condor exit; using original qty=%%d: %%s", qty, e)
+          close_qty = qty
+      if close_qty <= 0:
+          logging.warning("No open positions found for condor legs %%s; skipping exit", symbols)
+          return profit
+      logging.info("Exiting condor with qty=%%d (min filled across legs)", close_qty)
+      legs = [
+          OptionLegRequest(symbol=sym, ratio_qty=1, side=OrderSide.BUY)
+          for sym in symbols
+      ]
+      exit_order = MarketOrderRequest(
+          qty=close_qty,
+          time_in_force=TimeInForce.DAY,
+          order_class=OrderClass.MLEG,
+          legs=legs,
+      )
     legs = [
         OptionLegRequest(symbol=sym, ratio_qty=1, side=OrderSide.BUY)
         for sym in symbols

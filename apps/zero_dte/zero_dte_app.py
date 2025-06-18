@@ -208,6 +208,7 @@ class Settings(BaseSettings):
     DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
     DAILY_LOSS_LIMIT:    float = Field(0.0, description="Stop trading once we’ve lost $X today (0 to disable)")
     DAILY_DRAWDOWN_PCT: float = Field(0.05, description="Stop trading if cumulative drawdown >= X% of starting equity (default 5%)")
+    DAILY_PROFIT_PCT: float = Field(0.0, description="Stop trading and liquidate when account equity increases by X% intraday (0 to disable)")
 
     ALPACA_API_KEY: str = ""
     ALPACA_API_SECRET: str = ""
@@ -529,6 +530,82 @@ def submit_strangle(
 
 
 def monitor_and_exit_strangle(
+    trading: TradingClient, option_client: OptionHistoricalDataClient, symbols: list[str], entry_price_sum: float, qty: int, target_pct: float, poll_interval: float, exit_cutoff: dt_time,
+):
+    cfg = Settings()
+    # Portfolio-level profit and drawdown fail-safes
+    try:
+        account = trading.get_account()
+        equity = float(account.equity)
+        if daily_start_equity > 0:
+            pct_change = (equity - daily_start_equity) / daily_start_equity
+            # Profit percent fail-safe
+            if cfg.DAILY_PROFIT_PCT > 0 and pct_change >= cfg.DAILY_PROFIT_PCT:
+                logging.critical(
+                    "Daily profit percent target hit: %.2f%% >= %.2f%%; liquidating all positions.",
+                    pct_change * 100,
+                    cfg.DAILY_PROFIT_PCT * 100,
+                )
+                trading.close_all_positions()
+                type_shutdown.set()
+                return None
+            # Drawdown percent fail-safe
+            if cfg.DAILY_DRAWDOWN_PCT > 0 and -pct_change >= cfg.DAILY_DRAWDOWN_PCT:
+                logging.critical(
+                    "Daily drawdown percent exceeded: %.2f%% >= %.2f%%; liquidating all positions.",
+                    -pct_change * 100,
+                    cfg.DAILY_DRAWDOWN_PCT * 100,
+                )
+                trading.close_all_positions()
+                type_shutdown.set()
+                return None
+    except Exception as e:
+        logging.warning("Error checking portfolio-level fail-safes: %s", e)
+
+    # Portfolio-level profit percent fail-safe
+    if cfg.DAILY_PROFIT_PCT > 0 and daily_start_equity > 0:
+        try:
+            account = TradingClient.get_account(trading)
+            equity = float(account.equity)
+            pct = (equity - daily_start_equity) / daily_start_equity
+            if pct >= cfg.DAILY_PROFIT_PCT:
+                logging.critical(
+                    "Daily profit percent target hit: %.2f%% >= %.2f%%; liquidating all positions.",
+                    pct*100,
+                    cfg.DAILY_PROFIT_PCT*100,
+                )
+                try:
+                    trading.close_all_positions()
+                except Exception as e:
+                    logging.error("Error during portfolio liquidation: %s", e, exc_info=True)
+                type_shutdown.set()
+                return None
+        except Exception as e:
+            logging.warning("Error checking daily profit percent: %s", e)
+
+    # original code continues below
+    target_sum = entry_price_sum * (1 + target_pct)(
+    # Portfolio-level profit percent fail-safe
+    try:
+        account = trading.get_account()
+        equity = float(account.equity)
+        if cfg.DAILY_PROFIT_PCT > 0 and daily_start_equity > 0:
+            pct = (equity - daily_start_equity) / daily_start_equity
+            if pct >= cfg.DAILY_PROFIT_PCT:
+                logging.critical(
+                    "Daily profit percent target hit: %.2f%% >= %.2f%%; liquidating all positions.",
+                    pct * 100,
+                    cfg.DAILY_PROFIT_PCT * 100,
+                )
+                try:
+                    trading.close_all_positions()
+                    logging.info("All open positions closed due to daily profit percent target.")
+                except Exception as e:
+                    logging.error("Error during portfolio liquidation: %s", e, exc_info=True)
+                type_shutdown.set()
+                break
+    except Exception as e:
+        logging.warning("Error checking daily profit percent: %s", e)
     trading: TradingClient,
     option_client: OptionHistoricalDataClient,
     symbols: list[str],
@@ -722,6 +799,27 @@ def run_strangle(
                 qty,
                 original_qty,
             )
+            # Pre-check options buying power against estimated margin requirement for naked strangle
+            try:
+                account_bp = TradingClient.get_account(trading)
+                options_bp = float(account_bp.options_buying_power)
+                # margin requirement = premium credit * qty * 100
+                required_margin = entry_credit_est * qty * 100
+                if options_bp < required_margin:
+                    logging.warning(
+                        "Insufficient options buying power for naked strangle: required ~$%.2f, available $%.2f; skipping strangle.",
+                        required_margin,
+                        options_bp,
+                    )
+                    return
+                logging.info(
+                    "Proceeding with naked strangle; estimated margin requirement $%.2f <= available $%.2f",
+                    required_margin,
+                    options_bp,
+                )
+            except Exception as e:
+                logging.warning("Error checking options buying power: %s", e)
+
         except Exception as e:
             logging.warning(
                 "Error computing dynamic position size in strangle: %s; using default qty=%d",

@@ -12,6 +12,9 @@ This application executes 0DTE (zero days to expiration) OTM strangle and two-ph
 ## Prerequisites
 
 - Python 3.8+
+| `DAILY_PROFIT_PCT`      | `0.0`     | Intraday portfolio-level profit % threshold (liquidate when reached; 0 to disable). |
+| `DAILY_DRAWDOWN_PCT`    | `0.0`     | Intraday portfolio-level drawdown % threshold (liquidate when breached; 0 to disable). |
+
 - Install dependencies:
   ```bash
   pip install -r requirements.txt
