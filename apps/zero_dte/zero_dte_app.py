@@ -270,7 +270,7 @@ class Settings(BaseSettings):
 
 def setup_logging():
     # Rotate logs daily to a static file with 7-day retention
-    root = project_root
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     logs_dir = os.path.join(root, 'logs')
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, 'zero_dte.log')
@@ -869,7 +869,7 @@ def analyze_logs_for_date(trading_date: date):
     """
     Read the log file for the given trading date, summarize key metrics, and log recommendations.
     """
-    root = project_root
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     log_path = os.path.join(root, 'logs', f"{trading_date.isoformat()}.log")
     try:
         lines = open(log_path).read().splitlines()
