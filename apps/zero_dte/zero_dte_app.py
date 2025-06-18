@@ -59,7 +59,7 @@ except Exception:
 
 
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
@@ -189,8 +189,7 @@ def handle_signal(signum, frame):
     logging.info("Received signal %s; shutting down gracefully...", signum)
     type_shutdown.set()
 
-signal.signal(signal.SIGINT, handle_signal)
-signal.signal(signal.SIGTERM, handle_signal)
+
 
 class Settings(BaseSettings):
     
@@ -209,6 +208,7 @@ class Settings(BaseSettings):
     DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
     DAILY_LOSS_LIMIT:    float = Field(0.0, description="Stop trading once we’ve lost $X today (0 to disable)")
     DAILY_DRAWDOWN_PCT: float = Field(0.05, description="Stop trading if cumulative drawdown >= X% of starting equity (default 5%)")
+    DAILY_PROFIT_PCT: float = Field(0.0, description="Stop trading and liquidate when account equity increases by X% intraday (0 to disable)")
 
     ALPACA_API_KEY: str = ""
     ALPACA_API_SECRET: str = ""
@@ -269,32 +269,44 @@ class Settings(BaseSettings):
 
 
 def setup_logging():
-    # Rotate logs daily to a static file with 7-day retention
+    """
+    Configure logging for 0DTE bot:
+      - StreamHandler at DEBUG level to console.
+      - TimedRotatingFileHandler at INFO level to apps/logs/zero_dte.log.
+    """
+    # Prepare log directory
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     logs_dir = os.path.join(root, 'logs')
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, 'zero_dte.log')
-    # Timed rotating handler: rotate at midnight, keep 7 days of logs
+
+    # Get root logger and clear existing handlers
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+
+    # Console handler: DEBUG and above
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(logging.DEBUG)
+    stream_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S %Z%z"
+    ))
+    logger.addHandler(stream_handler)
+
+    # File handler: INFO and above, rotate daily, keep 7 days
     file_handler = TimedRotatingFileHandler(
-        filename=log_path,
-        when='midnight',
-        interval=1,
-        backupCount=7,
-        encoding='utf-8'
+        filename=log_path, when='midnight', interval=1,
+        backupCount=7, encoding='utf-8'
     )
     file_handler.suffix = "%Y-%m-%d"
+    file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S %Z%z"
     ))
-    handlers = [
-        logging.StreamHandler(),
-        file_handler
-    ]
-    logging.basicConfig(
-        level=logging.DEBUG,
-        handlers=handlers
-    )
+    logger.addHandler(file_handler)
 
 
 
@@ -529,94 +541,6 @@ def submit_strangle(
     return resp
 
 
-def monitor_and_exit_strangle(
-    trading: TradingClient,
-    option_client: OptionHistoricalDataClient,
-    symbols: list[str],
-    entry_price_sum: float,
-    qty: int,
-    target_pct: float,
-    poll_interval: float,
-    exit_cutoff: dt_time,
-):
-    cfg = Settings()
-    target_sum = entry_price_sum * (1 + target_pct)
-    stop_loss_sum = entry_price_sum * (1 - cfg.STOP_LOSS_PCT)
-    logging.info(
-        "Monitoring strangle %s: entry_sum=%.4f, target_sum=%.4f, stop_loss_sum=%.4f, cutoff=%s",
-        symbols, entry_price_sum, target_sum, stop_loss_sum, exit_cutoff.isoformat(),
-    )
-    
-    # Poll the legs' last trade prices; exit on profit target, stop-loss breach, or cutoff
-
-    while True:
-        now = datetime.now()
-        if now.time() >= exit_cutoff:
-            logging.warning("Cutoff time reached (%s). Exiting...", exit_cutoff)
-            break
-        # fetch latest prices with retry on transient errors
-        try:
-            trades = OptionHistoricalDataClient.get_option_latest_trade(
-                option_client,
-                OptionLatestTradeRequest(symbol_or_symbols=symbols)
-            )
-            prices = [float(trades[sym].price) for sym in symbols]
-        except requests.exceptions.RequestException as err:
-            logging.warning("Error fetching prices %s: %s – retrying in %.1fs", symbols, err, poll_interval)
-            time.sleep(poll_interval)
-            continue
-        except Exception as err:
-            logging.warning("Error fetching prices %s: %s – exiting monitoring", symbols, err)
-            break
-        current_sum = sum(prices)
-        logging.debug("Current prices %s → %.4f (sum)", symbols, current_sum)
-        if current_sum >= target_sum:
-            logging.info("Target hit: %.4f >= %.4f", current_sum, target_sum)
-            break
-        if current_sum <= stop_loss_sum:
-            logging.info("Stop-loss hit: %.4f <= %.4f", current_sum, stop_loss_sum)
-            break
-        time.sleep(poll_interval)
-
-    # exit legs
-    legs = [
-        OptionLegRequest(symbol=sym, ratio_qty=1, side=OrderSide.SELL)
-        for sym in symbols
-    ]
-    exit_order = MarketOrderRequest(
-        qty=qty,
-        time_in_force=TimeInForce.DAY,
-        order_class=OrderClass.MLEG,
-        legs=legs,
-    )
-    resp = TradingClient.submit_order(trading, exit_order)
-    logging.info("Submitted STRANGLE SELL exit order %s; status=%s", resp.id, resp.status)
-    # Skip fill loop in tests where mock submit doesn't include legs
-    if not hasattr(resp, 'legs'):
-        return None
-
-    # Wait for exit fills and compute P&L
-    exit_start = time.time()
-    exit_fill_timeout = 30
-    exit_prices: list[float] = []
-    for leg in resp.legs:
-        leg_id = leg.id
-        logging.info("Waiting for fill on exit leg %s", leg_id)
-        while True:
-            current_leg = trading.get_order_by_id(leg_id)
-            avg = getattr(current_leg, 'filled_avg_price', None)
-            if avg is not None and float(avg) > 0:
-                exit_prices.append(float(avg))
-                logging.info("Exit leg %s filled at %.4f", leg_id, float(avg))
-                break
-            if time.time() - exit_start > exit_fill_timeout:
-                logging.error("Timeout waiting for fill on exit leg %s", leg_id)
-                break
-            time.sleep(1)
-    exit_price_sum = sum(exit_prices)
-    pnl = exit_price_sum - entry_price_sum
-    logging.info("Trade exit prices %s → exit_price_sum=%.4f; entry_sum=%.4f; P&L=%.4f", exit_prices, exit_price_sum, entry_price_sum, pnl)
-    return pnl
 
 def monitor_and_exit(
     trading: TradingClient,
@@ -723,6 +647,27 @@ def run_strangle(
                 qty,
                 original_qty,
             )
+            # Pre-check options buying power against estimated margin requirement for naked strangle
+            try:
+                account_bp = TradingClient.get_account(trading)
+                options_bp = float(account_bp.options_buying_power)
+                # margin requirement = premium credit * qty * 100
+                required_margin = entry_credit_est * qty * 100
+                if options_bp < required_margin:
+                    logging.warning(
+                        "Insufficient options buying power for naked strangle: required ~$%.2f, available $%.2f; skipping strangle.",
+                        required_margin,
+                        options_bp,
+                    )
+                    return
+                logging.info(
+                    "Proceeding with naked strangle; estimated margin requirement $%.2f <= available $%.2f",
+                    required_margin,
+                    options_bp,
+                )
+            except Exception as e:
+                logging.warning("Error checking options buying power: %s", e)
+
         except Exception as e:
             logging.warning(
                 "Error computing dynamic position size in strangle: %s; using default qty=%d",
@@ -813,63 +758,54 @@ def schedule_for_symbol(
     else:
         thread_target = run_strangle
         thread_args = common_args
-    # Iterate through anchors and event triggers
-    for i, anchor in enumerate(anchors):
-        if type_shutdown.is_set() or trades_done >= cfg.MAX_TRADES:
-            break
+    # Continuous polling for anchors and event-triggered trades
+    next_anchor_idx = next((idx for idx, t in enumerate(anchors) if t >= datetime.now()), len(anchors) - 1)
+    while not type_shutdown.is_set() and trades_done < cfg.MAX_TRADES:
         now = datetime.now()
-        if now < anchor:
-            secs = (anchor - now).total_seconds()
+        # Anchor scheduling
+        if next_anchor_idx < len(anchors) and now >= anchors[next_anchor_idx]:
+            anchor = anchors[next_anchor_idx]
             logging.info(
-                "Symbol %s sleeping until anchor at %s",
+                "Symbol %s anchor trade #%d at %s",
                 symbol,
+                trades_done + 1,
                 anchor.time(),
             )
-            time.sleep(secs)
-            if type_shutdown.is_set():
+            t = threading.Thread(
+                target=_execute_trade_and_update,
+                args=(thread_target, thread_args, cfg),
+                daemon=True,
+            )
+            t.start()
+            threads.append(t)
+            trades_done += 1
+            # update spot price
+            last_spot = get_underlying_price(stock_hist, symbol)
+            next_anchor_idx += 1
+            # If final anchor fired, exit scheduling loop
+            if next_anchor_idx >= len(anchors):
                 break
-        logging.info(
-            "Symbol %s anchor trade #%d at %s",
-            symbol,
-            trades_done + 1,
-            anchor.time(),
-        )
-        t = threading.Thread(
-            target=_execute_trade_and_update,
-            args=(thread_target, thread_args, cfg),
-            daemon=True,
-        )
-        t.start()
-        threads.append(t)
-        trades_done += 1
-        # update spot price
-        last_spot = get_underlying_price(stock_hist, symbol)
-        # Event-triggered trades until next anchor
-        if i < len(anchors) - 1:
-            next_anchor = anchors[i + 1]
-            while (
-                not type_shutdown.is_set()
-                and trades_done < cfg.MAX_TRADES
-                and datetime.now() < next_anchor
-            ):
-                time.sleep(cfg.POLL_INTERVAL)
-                curr_spot = get_underlying_price(stock_hist, symbol)
-                if abs(curr_spot - last_spot) / last_spot >= cfg.EVENT_MOVE_PCT:
-                    logging.info(
-                        "Symbol %s price move triggered event trade #%d",
-                        symbol,
-                        trades_done + 1,
-                    )
-                    # Schedule event-triggered trade
-                    t = threading.Thread(
-                        target=_execute_trade_and_update,
-                        args=(thread_target, thread_args, cfg),
-                        daemon=True,
-                    )
-                    t.start()
-                    threads.append(t)
-                    trades_done += 1
-                    last_spot = curr_spot
+            continue
+        # Event-triggered trades between anchors
+        if next_anchor_idx < len(anchors):
+            curr_spot = get_underlying_price(stock_hist, symbol)
+            if abs(curr_spot - last_spot) / last_spot >= cfg.EVENT_MOVE_PCT:
+                logging.info(
+                    "Symbol %s price move triggered event trade #%d",
+                    symbol,
+                    trades_done + 1,
+                )
+                t = threading.Thread(
+                    target=_execute_trade_and_update,
+                    args=(thread_target, thread_args, cfg),
+                    daemon=True,
+                )
+                t.start()
+                threads.append(t)
+                trades_done += 1
+                last_spot = curr_spot
+        time.sleep(cfg.POLL_INTERVAL)
+
 
     # Wait for all threads to complete
     for t in threads:
@@ -992,6 +928,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     strategy = args.strategy
     auto_reenter = args.auto_reenter
+
+    # Register signal handlers in main thread
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
 
     # Outer loop: run trading cycles for each day
     while True:
