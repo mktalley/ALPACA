@@ -289,14 +289,26 @@ def setup_logging():
         "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S %Z%z"
     ))
-    handlers = [
-        logging.StreamHandler(),
-        file_handler
-    ]
-    logging.basicConfig(
-        level=logging.DEBUG,
-        handlers=handlers
-    )
+        # Configure root logger with separate handlers:
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    # Console handler: DEBUG and above
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.DEBUG)
+    stream_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S %Z%z"
+    ))
+    # File handler: INFO and above, timed rotation
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S %Z%z"
+    ))
+    # Clear existing handlers and add ours
+    logger.handlers.clear()
+    logger.addHandler(stream_handler)
+    logger.addHandler(file_handler)
 
 
 
