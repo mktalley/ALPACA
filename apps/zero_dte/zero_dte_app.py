@@ -269,45 +269,43 @@ class Settings(BaseSettings):
 
 
 def setup_logging():
-    # Rotate logs daily to a static file with 7-day retention
+    """
+    Configure logging for 0DTE bot:
+      - StreamHandler at DEBUG level to console.
+      - TimedRotatingFileHandler at INFO level to apps/logs/zero_dte.log.
+    """
+    # Prepare log directory
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     logs_dir = os.path.join(root, 'logs')
     os.makedirs(logs_dir, exist_ok=True)
     log_path = os.path.join(logs_dir, 'zero_dte.log')
-    # Timed rotating handler: rotate at midnight, keep 7 days of logs
-    file_handler = TimedRotatingFileHandler(
-        filename=log_path,
-        when='midnight',
-        interval=1,
-        backupCount=7,
-        encoding='utf-8'
-    )
-    file_handler.suffix = "%Y-%m-%d"
-    # Only record INFO and above to the file for readability
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S %Z%z"
-    ))
-        # Configure root logger with separate handlers:
+
+    # Get root logger and clear existing handlers
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
+    for handler in list(logger.handlers):
+        logger.removeHandler(handler)
+
     # Console handler: DEBUG and above
-    stream_handler = logging.StreamHandler()
+    stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(logging.DEBUG)
     stream_handler.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S %Z%z"
     ))
-    # File handler: INFO and above, timed rotation
+    logger.addHandler(stream_handler)
+
+    # File handler: INFO and above, rotate daily, keep 7 days
+    file_handler = TimedRotatingFileHandler(
+        filename=log_path, when='midnight', interval=1,
+        backupCount=7, encoding='utf-8'
+    )
+    file_handler.suffix = "%Y-%m-%d"
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter(
         "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S %Z%z"
     ))
-    # Clear existing handlers and add ours
-    logger.handlers.clear()
-    logger.addHandler(stream_handler)
     logger.addHandler(file_handler)
 
 
