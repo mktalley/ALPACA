@@ -12,7 +12,7 @@ import argparse
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Format zero_dte.log for human readability")
-    parser.add_argument('--input', '-i', default='logs/zero_dte.log', help='Path to zero_dte.log file')
+    parser.add_argument('--input', '-i', default='apps/logs/zero_dte.log', help='Path to zero_dte.log file (default apps/logs/zero_dte.log)')
     return parser.parse_args()
 
 
