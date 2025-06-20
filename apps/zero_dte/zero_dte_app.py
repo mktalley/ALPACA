@@ -255,11 +255,15 @@ class Settings(BaseSettings):
         dt_time(22, 45), description="Hard exit time (wall clock) if target not hit"
     )
     STOP_LOSS_PCT: float = Field(
-        0.20, description="Max allowable loss as a percent of entry (e.g. 0.20 = 20%)"
+        0.15, description="Max allowable loss as a percent of entry (e.g. 0.15 = 15%)"
     )
     RISK_PCT_PER_TRADE: float = Field(
-        0.01, description="Percent of equity to risk per trade (e.g. 0.01 = 1%)"
+        0.005, description="Percent of equity to risk per trade (e.g. 0.005 = 0.5%)"
     )
+    MAX_LOSS_PER_TRADE: float = Field(
+        1000.0, description="Maximum loss per trade (dollars)"
+    )
+
     CONDOR_TARGET_PCT: float = Field(
         0.25, description="Profit target as a percent for the condor phase in two-phase strategy"
     )
