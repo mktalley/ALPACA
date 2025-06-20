@@ -31,6 +31,7 @@ import signal  # for graceful shutdown
 import argparse
 import re  # regex for log analysis
 # Configure timezone for Eastern Time logging
+import random  # for jittering anchor times
 os.environ['TZ'] = 'America/New_York'
 time.tzset()
 daily_pnl: float = 0.0  # cumulative P&L for the trading day
@@ -858,15 +859,24 @@ def schedule_for_symbol(
     # Prepare anchor times for today
     today = date.today()
     trade_start_dt = datetime.combine(today, cfg.TRADE_START)
-    trade_end_dt = datetime.combine(today, cfg.TRADE_END)
+    # Use the earlier of TRADE_END or EXIT_CUTOFF for final anchor to avoid near-expiration entries
+    anchor_end_time = min(cfg.TRADE_END, cfg.EXIT_CUTOFF)
+    trade_end_dt = datetime.combine(today, anchor_end_time)
     duration = trade_end_dt - trade_start_dt
-    anchors = [
-        trade_start_dt,
-        trade_start_dt + duration / 4,
-        trade_start_dt + duration / 2,
-        trade_start_dt + (3 * duration) / 4,
-        trade_end_dt,
+    # Generate anchor times with ±5 min jitter (clamped to trading window)
+    raw_anchors = [
+        trade_start_dt + duration * frac
+        for frac in (0, 0.25, 0.5, 0.75, 1)
     ]
+    anchors = []
+    for base in raw_anchors:
+        jitter_offset = timedelta(seconds=random.uniform(-300, 300))
+        jittered = base + jitter_offset
+        if jittered < trade_start_dt:
+            jittered = trade_start_dt
+        elif jittered > trade_end_dt:
+            jittered = trade_end_dt
+        anchors.append(jittered)
     threads: list[threading.Thread] = []
     trades_done = 0
     # initial spot price
@@ -896,6 +906,42 @@ def schedule_for_symbol(
     next_anchor_idx = next((idx for idx, t in enumerate(anchors) if t >= datetime.now()), len(anchors) - 1)
     while not type_shutdown.is_set() and trades_done < cfg.MAX_TRADES:
         now = datetime.now()
+        # Poll live equity to enforce drawdown/profit limits
+        try:
+            account = trading.get_account()
+            current_equity = float(account.equity)
+            # Calculate drawdown and profit percentages
+            drawdown_pct = (daily_start_equity - current_equity) / daily_start_equity if daily_start_equity > 0 else 0
+            profit_pct = (current_equity - daily_start_equity) / daily_start_equity if daily_start_equity > 0 else 0
+            logging.info(
+                "Equity: %.2f, drawdown %.2f%%, profit %.2f%%",
+                current_equity,
+                drawdown_pct * 100,
+                profit_pct * 100,
+            )
+            # Check equity-based drawdown limit
+            if cfg.DAILY_DRAWDOWN_PCT > 0 and drawdown_pct >= cfg.DAILY_DRAWDOWN_PCT:
+                logging.critical(
+                    "Equity drawdown %.2f%% >= limit %.2f%%; liquidating and shutting down",
+                    drawdown_pct * 100,
+                    cfg.DAILY_DRAWDOWN_PCT * 100,
+                )
+                trading.close_all_positions()
+                type_shutdown.set()
+                break
+            # Check equity-based profit target
+            if cfg.DAILY_PROFIT_PCT > 0 and profit_pct >= cfg.DAILY_PROFIT_PCT:
+                logging.info(
+                    "Equity profit %.2f%% >= limit %.2f%%; liquidating and shutting down",
+                    profit_pct * 100,
+                    cfg.DAILY_PROFIT_PCT * 100,
+                )
+                trading.close_all_positions()
+                type_shutdown.set()
+                break
+        except Exception as e:
+            logging.warning("Equity check failed: %s", e)
+
         # Anchor scheduling
         if next_anchor_idx < len(anchors) and now >= anchors[next_anchor_idx]:
             anchor = anchors[next_anchor_idx]
