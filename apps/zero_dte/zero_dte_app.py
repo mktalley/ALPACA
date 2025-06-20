@@ -75,6 +75,29 @@ from alpaca.data.requests import (
 )
 
 
+def submit_complex_order(
+    trading: TradingClient,
+    legs: list[OptionLegRequest],
+    qty: int,
+) -> object:
+    """
+    Submit a multi-leg market order (MLEG) with the given legs and quantity.
+    """
+    order = MarketOrderRequest(
+        qty=qty,
+        time_in_force=TimeInForce.DAY,
+        order_class=OrderClass.MLEG,
+        legs=legs,
+    )
+    resp = TradingClient.submit_order(trading, order)
+    logging.info(
+        "Submitted COMPLEX order %s; status=%s",
+        getattr(resp, 'id', None),
+        getattr(resp, 'status', None),
+    )
+    return resp
+
+
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.historical.option import OptionHistoricalDataClient
 
@@ -594,6 +617,113 @@ def monitor_and_exit(
     resp = TradingClient.submit_order(trading, exit_order)
     logging.info("Submitted SELL exit order %s; status=%s", resp.id, resp.status)
     return resp
+
+
+
+def monitor_and_exit_strangle(
+    trading: TradingClient,
+    option_client: OptionHistoricalDataClient,
+    symbols: list[str],
+    entry_price_sum: float,
+    qty: int,
+    target_pct: float,
+    poll_interval: float,
+    exit_cutoff: dt_time,
+) -> float:
+    """
+    Monitor a multi-leg strangle and exit on profit target or stop-loss using a single MLEG order.
+    """
+    cfg = Settings()
+    target_sum = entry_price_sum * (1 + target_pct)
+    stop_loss_sum = entry_price_sum * (1 - cfg.STOP_LOSS_PCT)
+    global strangle_pnl_history
+    strangle_pnl_history = []
+    logging.info(
+        "Monitoring strangle %s: entry_sum=%.4f, target_sum=%.4f, stop_loss_sum=%.4f, cutoff=%s",
+        symbols, entry_price_sum, target_sum, stop_loss_sum, exit_cutoff.isoformat(),
+    )
+
+    while True:
+        now = datetime.now()
+        if now.time() >= exit_cutoff:
+            logging.warning("Strangle cutoff time reached (%s). Exiting monitor.", exit_cutoff)
+            break
+        try:
+            trades = OptionHistoricalDataClient.get_option_latest_trade(
+                option_client,
+                OptionLatestTradeRequest(symbol_or_symbols=symbols)
+            )
+            prices = [float(trades[sym].price) for sym in symbols]
+        except requests.exceptions.RequestException as err:
+            logging.warning(
+                "Error fetching strangle prices %s: %s – retrying in %.1fs",
+                symbols, err, poll_interval,
+            )
+            time.sleep(poll_interval)
+            continue
+                # Tighter logging: record equity & PnL snapshot
+        ts = datetime.now()
+        try:
+            account = TradingClient.get_account(trading)
+            equity = float(account.equity)
+        except Exception as e:
+            logging.warning(
+                "Unable to fetch equity during strangle monitor: %s", e
+            )
+            equity = None
+        current_sum = sum(prices)
+        trade_pnl = (current_sum - entry_price_sum) * qty
+        if equity is not None:
+            logging.debug(
+                "Current equity=%.2f, trade PnL=%.2f", equity, trade_pnl
+            )
+        else:
+            logging.debug(
+                "Trade PnL=%.2f", trade_pnl
+            )
+        strangle_pnl_history.append((ts, trade_pnl))
+        try:
+            account = TradingClient.get_account(trading)
+            equity = float(account.equity)
+            pnl = equity - daily_start_equity
+            logging.debug(
+                "Current equity=%.2f, PnL=%.2f", equity, pnl
+            )
+        except Exception as e:
+            logging.warning(
+                "Unable to fetch equity during strangle monitor: %s", e
+            )
+        current_sum = sum(prices)
+        logging.debug(
+            "Current strangle sum %s → %.4f", symbols, current_sum
+        )
+        if current_sum >= target_sum:
+            logging.info(
+                "Strangle target hit: %.4f >= %.4f", current_sum, target_sum
+            )
+            break
+        if current_sum <= stop_loss_sum:
+            logging.info(
+                "Strangle stop-loss hit: %.4f <= %.4f", current_sum, stop_loss_sum
+            )
+            break
+        time.sleep(poll_interval)
+
+    # Build exit legs and submit complex order
+    legs = [
+        OptionLegRequest(symbol=sym, ratio_qty=1, side=OrderSide.SELL)
+        for sym in symbols
+    ]
+    resp = submit_complex_order(trading, legs, qty)
+    
+    # Compute and return trade PnL
+    try:
+        pnl = (final_sum - entry_price_sum) * qty
+        logging.info("Exit PnL=%.2f", pnl)
+    except Exception:
+        pnl = 0.0
+        logging.warning("Unable to compute strangle PnL; returning 0.0")
+    return pnl
 
 
 
