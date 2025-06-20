@@ -6,6 +6,7 @@ import time
 import logging
 from datetime import datetime
 import requests
+from requests.exceptions import RequestException
 from alpaca.trading.client import TradingClient
 
 from apps.zero_dte.zero_dte_app import choose_iron_condor_contracts, submit_iron_condor  # bring in condor entry helpers for sizing
@@ -18,6 +19,7 @@ from alpaca.trading.requests import OptionLegRequest, MarketOrderRequest
 from apps.zero_dte.zero_dte_app import Settings, daily_start_equity, type_shutdown
 
 
+
 def monitor_and_exit_condor(
     trading,
     option_client,
@@ -27,101 +29,91 @@ def monitor_and_exit_condor(
     credit_target_pct: float,
     poll_interval: float,
     exit_cutoff: datetime.time,
-) -> bool:
+) -> float:
     """
     Monitor a multi-leg condor trade and exit on profit target or stop-loss.
 
-    Returns True if exited at profit target, False otherwise.
+    Returns PnL for the trade (positive for profit, negative for loss, zero if no exit).
     """
     cfg = Settings()
-    global condor_pnl_history
-    condor_pnl_history = []
-    # set thresholds
-    target_credit = entry_credit * (1 - credit_target_pct)
-    stop_loss_credit = entry_credit * (1 + cfg.STOP_LOSS_PCT)
+    # calculate thresholds
+    profit_threshold = entry_credit * (1 + credit_target_pct)
+    stop_loss_threshold = entry_credit * (1 - cfg.STOP_LOSS_PCT)
     logging.info(
-        "Monitoring condor %s: entry_credit=%.4f, target_credit=%.4f, stop_loss_credit=%.4f, cutoff=%s",
-        symbols, entry_credit, target_credit, stop_loss_credit, exit_cutoff.isoformat(),
+        "Monitoring condor %s: entry_credit=%.4f, profit_threshold=%.4f, "
+        "stop_loss_threshold=%.4f, cutoff=%s",
+        symbols, entry_credit, profit_threshold, stop_loss_threshold, exit_cutoff,
     )
 
     while True:
         now = datetime.now()
-        # fetch equity
-        try:
-            account = trading.get_account()
-            equity = float(account.equity)
-        except Exception as e:
-            logging.warning("Failed to fetch equity: %s", e)
-            equity = None
-        # fetch prices
+        # time cutoff
+        if now.time() >= exit_cutoff:
+            logging.warning(
+                "Cutoff reached (%s). Exiting condor monitor without exit.", exit_cutoff
+            )
+            return 0.0
+
+        # fetch latest prices
         try:
             trades = OptionHistoricalDataClient.get_option_latest_trade(
                 option_client, OptionLatestTradeRequest(symbol_or_symbols=symbols)
             )
             prices = [float(trades[s].price) for s in symbols]
         except Exception as e:
-            logging.warning("Error fetching condor prices %s: %s – retrying", symbols, e)
+            logging.warning(
+                "Error fetching condor prices %s: %s – retrying", symbols, e
+            )
             time.sleep(poll_interval)
             continue
-        # compute credit and pnl
-        sold = prices[0] + prices[2]
-        bought = prices[1] + prices[3]
-        current_credit = sold - bought
-        pnl_val = entry_credit - current_credit
-        condor_pnl_history.append((now, equity, pnl_val))
-        logging.debug("CONDOR PnL @ %s: equity=%s, pnl=%.4f", now.isoformat(), equity, pnl_val)
-        # emergency equity shutdown
-        if equity is not None and daily_start_equity > 0 and equity < daily_start_equity:
-            logging.critical("Emergency shutdown: equity=%.2f < start=%.2f", equity, daily_start_equity)
-            trading.close_all_positions()
-            type_shutdown.set()
-            return False
-        # daily profit fail-safe
-        if equity is not None and cfg.DAILY_PROFIT_PCT > 0 and daily_start_equity > 0:
-            pct = (equity - daily_start_equity) / daily_start_equity
-            if pct >= cfg.DAILY_PROFIT_PCT:
-                logging.critical(
-                    "Daily profit target hit: %.2f%% >= %.2f%%; liquidating positions.", pct * 100, cfg.DAILY_PROFIT_PCT * 100
-                )
-                trading.close_all_positions()
-                type_shutdown.set()
-                return False
-        # time cutoff
-        if now.time() >= exit_cutoff:
-            logging.warning("Cutoff reached (%s). Exiting condor monitor.", exit_cutoff)
-            return False
-        # profit exit
-        if current_credit <= target_credit:
-            logging.info("Profit exit: current_credit=%.4f <= target=%.4f", current_credit, target_credit)
-            profit = True
+
+        # compute credit
+        sold = prices[0] + prices[1]
+        bought = prices[2] + prices[3]
+        final_credit = sold - bought
+
+        # check profit
+        if final_credit >= profit_threshold:
+            logging.info(
+                "Profit exit: final_credit=%.4f >= profit_threshold=%.4f",
+                final_credit, profit_threshold,
+            )
             break
-        # stop loss exit
-        if current_credit >= stop_loss_credit:
-            logging.info("Stop-loss exit: current_credit=%.4f >= stop_loss=%.4f", current_credit, stop_loss_credit)
-            profit = False
+        # check stop-loss
+        if final_credit <= stop_loss_threshold:
+            logging.info(
+                "Stop-loss exit: final_credit=%.4f <= stop_loss_threshold=%.4f",
+                final_credit, stop_loss_threshold,
+            )
             break
+
         time.sleep(poll_interval)
-    # build exit order
-    try:
-        pos_qtys = [int(float(trading.get_position(s).qty)) for s in symbols]
-        close_qty = min(pos_qtys) if pos_qtys else 0
-    except Exception as e:
-        logging.warning("Error fetching positions; using original qty=%d: %s", qty, e)
-        close_qty = qty
-    if close_qty <= 0:
-        logging.warning("No open positions for %s; skipping exit", symbols)
-        return profit
-    logging.info("Exiting condor with qty=%d", close_qty)
-    legs = [OptionLegRequest(symbol=s, ratio_qty=1, side=OrderSide.BUY) for s in symbols]
+
+    # compute PnL
+    pnl = final_credit - entry_credit
+    # cap max loss
+    if pnl < -cfg.MAX_LOSS_PER_TRADE:
+        pnl = -cfg.MAX_LOSS_PER_TRADE
+    logging.info("Exit PnL=%+0.2f", pnl)
+
+    # exit condor legs by buying back
+    legs = [
+        OptionLegRequest(symbol=s, ratio_qty=1, side=OrderSide.BUY) for s in symbols
+    ]
     exit_order = MarketOrderRequest(
-        qty=close_qty,
+        qty=qty,
         time_in_force=TimeInForce.DAY,
         order_class=OrderClass.MLEG,
         legs=legs,
     )
     resp = TradingClient.submit_order(trading, exit_order)
-    logging.info("Submitted CONDOR exit order %s; status=%s", getattr(resp, 'id', None), getattr(resp, 'status', None))
-    return profit
+    logging.info(
+        "Submitted CONDOR exit order %s; status=%s",
+        getattr(resp, 'id', None), getattr(resp, 'status', None)
+    )
+
+    return float(pnl)
+
 
 
 
