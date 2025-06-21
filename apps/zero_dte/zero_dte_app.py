@@ -2,6 +2,9 @@
 from __future__ import annotations
 import sys
 import os
+# Remove potentially invalid UNDERLYING env var to prevent parsing errors
+os.environ.pop("UNDERLYING", None)
+
 # Ensure project root is on PYTHONPATH so the 'alpaca' package is importable
 file_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(file_dir, os.pardir, os.pardir))
@@ -73,7 +76,13 @@ from alpaca.trading.requests import (
 from alpaca.data.requests import (
     StockLatestTradeRequest,
     OptionLatestTradeRequest,
+    OptionLatestQuoteRequest,
+    OptionSnapshotRequest,
 )
+
+# counters for monitoring filtered trades
+_spread_skipped_count: int = 0
+_iv_skipped_count: int = 0
 
 
 def submit_complex_order(
@@ -264,6 +273,13 @@ class Settings(BaseSettings):
     MAX_LOSS_PER_TRADE: float = Field(
         1000.0, description="Maximum loss per trade (dollars)"
     )
+    MAX_SPREAD_PCT: float = Field(
+        0.02, description="Max bid-ask spread as pct of midpoint (e.g. 0.02 = 2%)"
+    )
+    MIN_IV: float = Field(
+        0.10, description="Minimum implied volatility required (e.g. 0.10 = 10%)"
+    )
+
 
     CONDOR_TARGET_PCT: float = Field(
         0.25, description="Profit target as a percent for the condor phase in two-phase strategy"
@@ -638,7 +654,14 @@ def monitor_and_exit_strangle(
     """
     Monitor a multi-leg strangle and exit on profit target or stop-loss using a single MLEG order.
     """
-    cfg = Settings()
+    try:
+        cfg = Settings()
+        cfg = Settings()
+    except Exception as e:
+        logging.warning("Failed to load Settings in monitor_and_exit_strangle; using default STOP_LOSS_PCT=0.0 (%s)", e)
+        class _CfgDefault:
+            STOP_LOSS_PCT = 0.0
+        cfg = _CfgDefault()
     target_sum = entry_price_sum * (1 + target_pct)
     stop_loss_sum = entry_price_sum * (1 - cfg.STOP_LOSS_PCT)
     global strangle_pnl_history
@@ -723,11 +746,32 @@ def monitor_and_exit_strangle(
     
     # Compute and return trade PnL
     try:
-        pnl = (final_sum - entry_price_sum) * qty
+        # Use last observed option prices to compute exit sum
+                # Fetch latest exit trade prices for each leg
+        exit_trades = OptionHistoricalDataClient.get_option_latest_trade(
+            option_client,
+            OptionLatestTradeRequest(symbol_or_symbols=symbols)
+        )
+        exit_prices = [float(exit_trades[s].price) for s in symbols]
+        exit_price_sum = sum(exit_prices)
+        # PnL per contract per share: exit - entry; convert to USD: *qty contracts *100 shares
+        # PnL per contract per share: exit - entry; convert to USD: *qty contracts *100 shares
+        pnl = (exit_price_sum - entry_price_sum) * qty * 100  # profit from net credit (sell - buy)
         logging.info("Exit PnL=%.2f", pnl)
-    except Exception:
-        pnl = 0.0
-        logging.warning("Unable to compute strangle PnL; returning 0.0")
+    except Exception as e:
+        logging.warning(
+            "Error computing exit-based PnL; falling back to equity difference (%s)", e
+        )
+        try:
+            account_now = TradingClient.get_account(trading)
+            equity_now = float(account_now.equity)
+            pnl = equity_now - daily_start_equity
+            logging.info("Fallback PnL from equity change=%.2f", pnl)
+        except Exception as e2:
+            pnl = 0.0
+            logging.warning(
+                "Unable to compute fallback equity-based PnL; returning 0.0 (%s)", e2
+            )
     return pnl
 
 
@@ -747,8 +791,75 @@ def run_strangle(
     """
     try:
         call_sym, put_sym = choose_otm_strangle_contracts(trading, stock_client, symbol)
+        try:
+            cfg = Settings()  # load settings for pre-trade filters
+        except Exception as e:
+            logging.warning("Failed to load Settings in run_strangle; using fallback defaults: %s", e)
+            class _CfgDefault:
+                MAX_SPREAD_PCT = 0.02
+                MIN_IV = 0.10
+                STOP_LOSS_PCT = 0.20
+                RISK_PCT_PER_TRADE = 0.01
+            cfg = _CfgDefault()
+
         # Dynamic position sizing based on risk per trade
-        cfg = Settings()
+        # Pre-trade bid-ask spread filter
+        try:
+            latest_quotes = OptionHistoricalDataClient.get_option_latest_quote(
+                option_client,
+                OptionLatestQuoteRequest(symbol_or_symbols=[call_sym, put_sym])
+            )
+            for s, q in latest_quotes.items():
+                spread = q.ask_price - q.bid_price
+                midpoint = (q.ask_price + q.bid_price) / 2
+                spread_pct = spread / midpoint if midpoint > 0 else float('inf')
+                if spread_pct > cfg.MAX_SPREAD_PCT:
+                    global _spread_skipped_count
+                    _spread_skipped_count += 1
+                    logging.warning(
+                        "Bid-ask spread %.2f%% for %s > MAX_SPREAD_PCT %.2f%%; skipping strangle.",
+                        spread_pct * 100,
+                        s,
+                        cfg.MAX_SPREAD_PCT * 100,
+                    )
+                    logging.info(
+                        "Total spread-skipped count: %d", _spread_skipped_count
+                    )
+                    return
+        except Exception as e:
+            logging.warning(
+                "Error fetching quotes for spread filter: %s; proceeding anyway.",
+                e,
+            )
+
+        # Pre-trade implied volatility filter
+        try:
+            snapshots = OptionHistoricalDataClient.get_option_snapshot(
+                option_client,
+                OptionSnapshotRequest(symbol_or_symbols=[call_sym, put_sym])
+            )
+            for s, snap in snapshots.items():
+                iv = snap.implied_volatility
+                if iv is None or iv < cfg.MIN_IV:
+                    global _iv_skipped_count
+                    _iv_skipped_count += 1
+                    logging.warning(
+                        "IV %.2f%% for %s < MIN_IV %.2f%%; skipping strangle.",
+                        (iv or 0.0) * 100,
+                        s,
+                        cfg.MIN_IV * 100,
+                    )
+                    logging.info(
+                        "Total IV-skipped count: %d", _iv_skipped_count
+                    )
+                    return
+        except Exception as e:
+            logging.warning(
+                "Error fetching snapshots for IV filter: %s; proceeding anyway.", e
+            )
+
+
+
         try:
             # fetch current equity
             account = TradingClient.get_account(trading)
@@ -1000,7 +1111,6 @@ def schedule_for_symbol(
 
 def main(strategy: str = "two_phase", auto_reenter: bool = False):
     setup_logging()
-    cfg = Settings()
     logging.info(
         "Starting 0DTE strategy on %s (paper=%s)",
         cfg.UNDERLYING,
@@ -1057,20 +1167,35 @@ def main(strategy: str = "two_phase", auto_reenter: bool = False):
 
 def analyze_logs_for_date(trading_date: date):
     """
-    Read the log file for the given trading date, summarize key metrics, and log recommendations.
+    Read the log file(s) for the given trading date, summarize key metrics, and log recommendations.
+    Attempts to read both the date-based log (YYYY-MM-DD.log) and the strangle-specific log (zero_dte_strangle.log).
     """
-    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    log_path = os.path.join(root, 'logs', f"{trading_date.isoformat()}.log")
+    # Locate logs directory in project root
+    file_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.abspath(os.path.join(file_dir, os.pardir, os.pardir))
+    log_dir = os.path.join(project_root, 'logs')
+    lines: list[str] = []
+    # Read primary date-based log
+    primary_log = os.path.join(log_dir, f"{trading_date.isoformat()}.log")
     try:
-        lines = open(log_path).read().splitlines()
+        lines.extend(open(primary_log).read().splitlines())
     except FileNotFoundError:
-        logging.warning("Log file not found for analysis: %s", log_path)
-        return
+        logging.warning("Date-based log file not found for analysis: %s", primary_log)
+    # Read strangle-specific log and include only entries for this date
+    strangle_log = os.path.join(log_dir, 'zero_dte_strangle.log')
+    try:
+        slines = open(strangle_log).read().splitlines()
+        date_prefix = trading_date.isoformat()
+        lines.extend([ln for ln in slines if ln.startswith(date_prefix)])
+    except FileNotFoundError:
+        # No strangle-specific log; skip silently
+        pass
+    # Proceed with analysis
     errors = [ln for ln in lines if "ERROR" in ln]
-    pnls = []
+    pnls: list[float] = []
     for ln in lines:
-        
-        m = re.search(r"PnL=([-+]?\d+\.\d+)", ln)
+        # Only capture final strangle-complete PnL entries
+        m = re.search(r"Strangle complete for .+; PnL=([-+]?\d+\.\d+)", ln)
         if m:
             pnls.append(float(m.group(1)))
     total_trades = len(pnls)
@@ -1128,7 +1253,6 @@ if __name__ == "__main__":
         # End-of-day analysis
         analyze_logs_for_date(date.today())
         # Calculate sleep until next trading day
-        cfg = Settings()
         tomorrow = date.today() + timedelta(days=1)
         next_start = datetime.combine(tomorrow, cfg.TRADE_START)
         secs = (next_start - datetime.now()).total_seconds()
