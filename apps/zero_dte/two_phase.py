@@ -37,8 +37,10 @@ def monitor_and_exit_condor(
     """
     cfg = Settings()
     # calculate thresholds
-    profit_threshold = entry_credit * (1 + credit_target_pct)
-    stop_loss_threshold = entry_credit * (1 - cfg.STOP_LOSS_PCT)
+    # For a short credit condor, profit when the credit we must pay to close
+    # DROPS (i.e., current credit < entry credit).  Loss when credit rises.
+    profit_threshold = entry_credit * (1 - credit_target_pct)
+    stop_loss_threshold = entry_credit * (1 + cfg.STOP_LOSS_PCT)
     logging.info(
         "Monitoring condor %s: entry_credit=%.4f, profit_threshold=%.4f, "
         "stop_loss_threshold=%.4f, cutoff=%s",
@@ -72,17 +74,17 @@ def monitor_and_exit_condor(
         bought = prices[2] + prices[3]
         final_credit = sold - bought
 
-        # check profit
-        if final_credit >= profit_threshold:
+        # check profit (credit decreased)
+        if final_credit <= profit_threshold:
             logging.info(
-                "Profit exit: final_credit=%.4f >= profit_threshold=%.4f",
+                "Profit exit: final_credit=%.4f <= profit_threshold=%.4f",
                 final_credit, profit_threshold,
             )
             break
-        # check stop-loss
-        if final_credit <= stop_loss_threshold:
+                # check stop-loss (credit increased)
+        if final_credit >= stop_loss_threshold:
             logging.info(
-                "Stop-loss exit: final_credit=%.4f <= stop_loss_threshold=%.4f",
+                "Stop-loss exit: final_credit=%.4f >= stop_loss_threshold=%.4f",
                 final_credit, stop_loss_threshold,
             )
             break
