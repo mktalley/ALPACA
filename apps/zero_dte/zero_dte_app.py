@@ -323,6 +323,9 @@ class Settings(BaseSettings):
         0.5, description="Maximum allowed IV rank (0-1) for anchor and event trades"
     )
 
+    VIX_HIGH: float = Field(
+        18.0, description="VIX threshold to switch to deep OTM strikes"
+    )
     TRADE_START: dt_time = Field(
         dt_time(10, 30), description="Earliest time to enter trades (ET)"
     )
@@ -331,17 +334,19 @@ class Settings(BaseSettings):
     )
 
     class Config:
-        env_file = "apps/zero_dte/.env"
+        env_file = ".env"
         env_file_encoding = "utf-8"
 
     @field_validator("EXIT_CUTOFF", mode="before")
-    VIX_HIGH: float = Field(18.0, description="VIX threshold to switch to deep OTM strikes")
-
     def parse_exit_time(cls, v):
         if isinstance(v, str):
             return dt_time.fromisoformat(v)
         return v
 
+
+
+# Instantiate global configuration once for runtime modules
+cfg = Settings()
 
 
 def setup_logging():
