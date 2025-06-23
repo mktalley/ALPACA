@@ -8,6 +8,28 @@ os.environ.pop("UNDERLYING", None)
 # Ensure project root is on PYTHONPATH so the 'alpaca' package is importable
 file_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(file_dir, os.pardir, os.pardir))
+from pathlib import Path
+import yaml
+
+# Load YAML overrides (config/zero_dte.yaml) into environment so pydantic Settings can see them.
+def _apply_yaml_overrides():
+    cfg_path = Path("config/zero_dte.yaml")
+    if not cfg_path.exists():
+        return
+    try:
+        data = yaml.safe_load(cfg_path.read_text()) or {}
+    except Exception as e:
+        print("Warning: could not parse YAML config", cfg_path, e)
+        return
+    for key, val in data.items():
+        # Lists → comma-separated; bool/float/int → str
+        if isinstance(val, list):
+            os.environ.setdefault(key, ",".join(map(str, val)))
+        else:
+            os.environ.setdefault(key, str(val))
+
+_apply_yaml_overrides()
+
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
@@ -45,6 +67,8 @@ from pydantic import SecretStr
 # Workaround: alias Secret to SecretStr so pydantic-settings can import Secret
 pydantic.Secret = SecretStr
 
+
+import pandas as pd
 
 
 
@@ -240,7 +264,7 @@ class Settings(BaseSettings):
 class Settings(BaseSettings):
     DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
     DAILY_LOSS_LIMIT:    float = Field(0.0, description="Stop trading once we’ve lost $X today (0 to disable)")
-    DAILY_DRAWDOWN_PCT: float = Field(0.05, description="Stop trading if cumulative drawdown >= X% of starting equity (default 5%)")
+    DAILY_DRAWDOWN_PCT: float = Field(0.03, description="Stop trading if cumulative drawdown >= X% of starting equity (default 3%)")
     DAILY_PROFIT_PCT: float = Field(0.0, description="Stop trading and liquidate when account equity increases by X% intraday (0 to disable)")
 
     ALPACA_API_KEY: str = ""
@@ -258,17 +282,17 @@ class Settings(BaseSettings):
             raise ValueError("UNDERLYING must be a string or list of strings")
     QTY: int = Field(10, description="Number of contracts per leg")
     PROFIT_TARGET_PCT: float = Field(
-        0.75, description="Profit target as a percent of entry price (e.g. 0.75 = 75%)"
+        0.65, description="Profit target as a percent of entry price (e.g. 0.65 = 65%)"
     )
     POLL_INTERVAL: float = Field(120.0, description="Seconds between price checks")
     EXIT_CUTOFF: dt_time = Field(
         dt_time(22, 45), description="Hard exit time (wall clock) if target not hit"
     )
     STOP_LOSS_PCT: float = Field(
-        0.15, description="Max allowable loss as a percent of entry (e.g. 0.15 = 15%)"
+        0.25, description="Max allowable loss as a percent of entry (e.g. 0.25 = 25%)"
     )
     RISK_PCT_PER_TRADE: float = Field(
-        0.005, description="Percent of equity to risk per trade (e.g. 0.005 = 0.5%)"
+        0.0025, description="Percent of equity to risk per trade (e.g. 0.0025 = 0.25%)"
     )
     MAX_LOSS_PER_TRADE: float = Field(
         1000.0, description="Maximum loss per trade (dollars)"
@@ -288,13 +312,19 @@ class Settings(BaseSettings):
         2, description="Wing width in strikes for the condor phase"
     )
 
-    MAX_TRADES: int = Field(20, description="Maximum number of strangle trades per day")
+    MAX_TRADES: int = Field(15, description="Maximum number of strangle trades per day")
     EVENT_MOVE_PCT: float = Field(
         0.0015, description="Price move percent to trigger event trades (e.g. 0.0015 = 0.15%)"
     )
+    ANCHOR_MOVE_PCT_MAX: float = Field(
+        0.006, description="Max 09:30-10:00 price range to allow anchor entries (e.g. 0.006 = 0.6%)"
+    )
+    IV_RANK_THRESHOLD: float = Field(
+        0.5, description="Maximum allowed IV rank (0-1) for anchor and event trades"
+    )
 
     TRADE_START: dt_time = Field(
-        dt_time(9, 45), description="Earliest time to enter trades (ET)"
+        dt_time(10, 30), description="Earliest time to enter trades (ET)"
     )
     TRADE_END: dt_time = Field(
         dt_time(12, 30), description="Latest time to enter trades (ET)"
@@ -305,6 +335,8 @@ class Settings(BaseSettings):
         env_file_encoding = "utf-8"
 
     @field_validator("EXIT_CUTOFF", mode="before")
+    VIX_HIGH: float = Field(18.0, description="VIX threshold to switch to deep OTM strikes")
+
     def parse_exit_time(cls, v):
         if isinstance(v, str):
             return dt_time.fromisoformat(v)
@@ -356,6 +388,80 @@ def setup_logging():
 
 
 def get_underlying_price(stock_client: StockHistoricalDataClient, symbol: str) -> float:
+    """Fetch latest spot price with retries."""
+    resp = safe_api_call(
+        stock_client.get_stock_latest_trade,
+        StockLatestTradeRequest(symbol_or_symbols=[symbol])
+    )
+    trade = resp[symbol]
+    return float(trade.price)
+
+# ---------------------------------------------------------------------------
+# Volatility helpers
+# ---------------------------------------------------------------------------
+
+def _morning_move_pct(stock_client: StockHistoricalDataClient, symbol: str, ref_date: date | None = None) -> float:
+    """Return 09:30–10:00 ET high-low range as percent of 09:30 open."""
+    if ref_date is None:
+        ref_date = date.today()
+    tz = ZoneInfo("America/New_York")
+    start_et = datetime.combine(ref_date, dt_time(9, 30), tzinfo=tz)
+    end_et   = datetime.combine(ref_date, dt_time(10, 0), tzinfo=tz)
+    start_utc= start_et.astimezone(ZoneInfo("UTC"))
+    end_utc  = end_et.astimezone(ZoneInfo("UTC"))
+    bars = safe_api_call(
+        stock_client.get_stock_bars,
+        StockBarsRequest(symbol_or_symbols=[symbol], timeframe=TimeFrame.Minute, start=start_utc, end=end_utc)
+    ).df
+    if bars.empty:
+        return 0.0
+
+
+    if isinstance(bars.index, pd.MultiIndex):
+        bars = bars.xs(symbol, level="symbol")
+    open_price = bars.iloc[0]["open"]
+    hi = bars["high"].max()
+    lo = bars["low"].min()
+    return (hi - lo) / open_price
+def _iv_rank(stock_client: StockHistoricalDataClient, symbol: str, lookback_days: int = 30) -> float:
+    """Return a placeholder IV rank between 0 and 1.
+    TODO: Implement proper IV rank using option IV history.
+    """
+    logging.debug("IV rank placeholder for %s", symbol)
+    return 0.3
+
+
+def _should_enter_trade(stock_client: StockHistoricalDataClient,
+                        option_hist: OptionHistoricalDataClient,
+                        symbol: str,
+                        cfg: Settings,
+                        is_anchor: bool) -> bool:
+    """Return True if context filters allow a new entry."""
+    try:
+        iv_rank = _iv_rank(stock_client, symbol)
+        if iv_rank > cfg.IV_RANK_THRESHOLD:
+            logging.info("%s IV rank %.2f > threshold %.2f; skipping trade", symbol, iv_rank, cfg.IV_RANK_THRESHOLD)
+            return False
+    except Exception as e:
+        logging.warning("IV rank check failed for %s: %s", symbol, e)
+
+    if is_anchor:
+        try:
+            move_pct = _morning_move_pct(stock_client, symbol)
+            if move_pct > cfg.ANCHOR_MOVE_PCT_MAX:
+                logging.info("%s morning move %.3f > %.3f; skipping anchor trade", symbol, move_pct, cfg.ANCHOR_MOVE_PCT_MAX)
+                return False
+        except Exception as e:
+            logging.warning("Morning move check failed for %s: %s", symbol, e)
+    return True
+
+    if isinstance(bars.index, pd.MultiIndex):
+        bars = bars.xs(symbol, level="symbol")
+    open_price = bars.iloc[0]["open"]
+    hi = bars["high"].max()
+    lo = bars["low"].min()
+    return (hi - lo) / open_price
+
     """Fetch spot price with retries."""
     resp = safe_api_call(
         stock_client.get_stock_latest_trade,
@@ -992,28 +1098,35 @@ def schedule_for_symbol(
     trades_done = 0
     # initial spot price
     last_spot = get_underlying_price(stock_hist, symbol)
-    # Prepare common arguments tuple
-    common_args = (
-        trading,
-        stock_hist,
-        option_hist,
-        symbol,
-        cfg.QTY,
-        cfg.PROFIT_TARGET_PCT,
-        cfg.POLL_INTERVAL,
-        cfg.EXIT_CUTOFF,
-    )
-    # Determine thread target and args based on strategy
+
+    def _build_args(qty: int) -> tuple:
+        base = (
+            trading,
+            stock_hist,
+            option_hist,
+            symbol,
+            qty,
+            cfg.PROFIT_TARGET_PCT,
+            cfg.POLL_INTERVAL,
+            cfg.EXIT_CUTOFF,
+        )
+        if strategy == "two_phase":
+            return base + (cfg.CONDOR_TARGET_PCT,)
+        return base
+
+    # Determine thread target
     if strategy == "two_phase":
         if run_two_phase is None:
             from apps.zero_dte.two_phase import run_two_phase as _rp
             globals()["run_two_phase"] = _rp
         thread_target = run_two_phase
-        thread_args = common_args + (cfg.CONDOR_TARGET_PCT,)
     else:
         thread_target = run_strangle
-        thread_args = common_args
-    # Continuous polling for anchors and event-triggered trades
+
+    anchor_args = _build_args(cfg.QTY)
+    event_args  = _build_args(max(1, cfg.QTY // 2))
+
+    event_trade_since_anchor = False    # Continuous polling for anchors and event-triggered trades
     next_anchor_idx = next((idx for idx, t in enumerate(anchors) if t >= datetime.now()), len(anchors) - 1)
     while not type_shutdown.is_set() and trades_done < cfg.MAX_TRADES:
         now = datetime.now()
@@ -1062,23 +1175,24 @@ def schedule_for_symbol(
                 trades_done + 1,
                 anchor.time(),
             )
-            t = threading.Thread(
-                target=_execute_trade_and_update,
-                args=(thread_target, thread_args, cfg),
-                daemon=True,
-            )
-            t.start()
-            threads.append(t)
-            trades_done += 1
-            # update spot price
-            last_spot = get_underlying_price(stock_hist, symbol)
+            if _should_enter_trade(stock_hist, option_hist, symbol, cfg, is_anchor=True):
+                t = threading.Thread(
+                    target=_execute_trade_and_update,
+                    args=(thread_target, anchor_args, cfg),
+                    daemon=True,
+                )
+                t.start()
+                threads.append(t)
+                trades_done += 1
+                last_spot = get_underlying_price(stock_hist, symbol)
+                event_trade_since_anchor = False
             next_anchor_idx += 1
             # If final anchor fired, exit scheduling loop
             if next_anchor_idx >= len(anchors):
                 break
             continue
         # Event-triggered trades between anchors
-        if next_anchor_idx < len(anchors):
+        if next_anchor_idx < len(anchors) and not event_trade_since_anchor:
             curr_spot = get_underlying_price(stock_hist, symbol)
             if abs(curr_spot - last_spot) / last_spot >= cfg.EVENT_MOVE_PCT:
                 logging.info(
@@ -1088,12 +1202,13 @@ def schedule_for_symbol(
                 )
                 t = threading.Thread(
                     target=_execute_trade_and_update,
-                    args=(thread_target, thread_args, cfg),
+                    args=(thread_target, event_args, cfg),
                     daemon=True,
                 )
                 t.start()
                 threads.append(t)
                 trades_done += 1
+                event_trade_since_anchor = True
                 last_spot = curr_spot
         time.sleep(cfg.POLL_INTERVAL)
 
