@@ -18,7 +18,6 @@ from datetime import date, datetime
 from datetime import time as dt_time
 from datetime import timedelta, timezone
 from typing import Dict, List, Tuple
-
 # Alpaca bar timestamps are UTC; convert to Eastern for convenience
 from zoneinfo import ZoneInfo
 

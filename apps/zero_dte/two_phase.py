@@ -15,15 +15,10 @@ from alpaca.data.requests import OptionLatestTradeRequest
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
 from alpaca.trading.requests import MarketOrderRequest, OptionLegRequest
-
 # Import Settings for stop-loss percentage
 from apps.zero_dte.zero_dte_app import (  # bring in condor entry helpers for sizing
-    Settings,
-    choose_iron_condor_contracts,
-    daily_start_equity,
-    submit_iron_condor,
-    type_shutdown,
-)
+    Settings, choose_iron_condor_contracts, daily_start_equity,
+    submit_iron_condor, type_shutdown)
 
 
 def monitor_and_exit_condor(

@@ -3,18 +3,14 @@ from uuid import UUID
 from alpaca.broker.client import BrokerClient
 from alpaca.broker.enums import JournalEntryType
 from alpaca.broker.models import BatchJournalResponse, Journal
-from alpaca.broker.requests import (
-    CreateBatchJournalRequest,
-    CreateJournalRequest,
-    CreateReverseBatchJournalRequest,
-    GetJournalsRequest,
-)
+from alpaca.broker.requests import (CreateBatchJournalRequest,
+                                    CreateJournalRequest,
+                                    CreateReverseBatchJournalRequest,
+                                    GetJournalsRequest)
 from alpaca.common.enums import BaseURL, SupportedCurrencies
 
-from ..factories import (
-    create_dummy_batch_journal_entries,
-    create_dummy_reverse_batch_journal_entries,
-)
+from ..factories import (create_dummy_batch_journal_entries,
+                         create_dummy_reverse_batch_journal_entries)
 
 
 def test_create_journal(reqmock, client: BrokerClient):

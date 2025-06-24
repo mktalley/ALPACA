@@ -58,7 +58,6 @@ Designed for institutional clients:
 import argparse
 import logging
 import os
-
 # Configure timezone for Eastern Time logging
 import random  # for jittering anchor times
 import re  # regex for log analysis
@@ -100,19 +99,14 @@ except Exception:
 
 from pydantic import Field, field_validator, model_validator
 
-from alpaca.data.requests import (
-    OptionLatestQuoteRequest,
-    OptionLatestTradeRequest,
-    OptionSnapshotRequest,
-    StockLatestTradeRequest,
-)
+from alpaca.data.requests import (OptionLatestQuoteRequest,
+                                  OptionLatestTradeRequest,
+                                  OptionSnapshotRequest,
+                                  StockLatestTradeRequest)
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
-from alpaca.trading.requests import (
-    GetOptionContractsRequest,
-    MarketOrderRequest,
-    OptionLegRequest,
-)
+from alpaca.trading.requests import (GetOptionContractsRequest,
+                                     MarketOrderRequest, OptionLegRequest)
 
 # counters for monitoring filtered trades
 _spread_skipped_count: int = 0
@@ -1326,11 +1320,8 @@ def schedule_for_symbol(
     # Day-type classification (Phase-1)
     # ------------------------------------------------------------------
     from apps.zero_dte.config import load_daytype_config
-    from apps.zero_dte.market_structure import (
-        StrategyID,
-        StrategySelector,
-        classify_day,
-    )
+    from apps.zero_dte.market_structure import (StrategyID, StrategySelector,
+                                                classify_day)
 
     cfg_yaml = load_daytype_config()
     day_type = classify_day(symbol, stock_hist, cfg=cfg_yaml)

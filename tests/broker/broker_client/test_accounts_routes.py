@@ -9,19 +9,15 @@ import pytest
 from alpaca.broker.client import BrokerClient
 from alpaca.broker.enums import AccountEntities
 from alpaca.broker.models import Account, Contact, Identity, TradeAccount
-from alpaca.broker.requests import (
-    CreateAccountRequest,
-    ListAccountsRequest,
-    UpdatableContact,
-    UpdatableDisclosures,
-    UpdatableIdentity,
-    UpdatableTrustedContact,
-    UpdateAccountRequest,
-)
+from alpaca.broker.requests import (CreateAccountRequest, ListAccountsRequest,
+                                    UpdatableContact, UpdatableDisclosures,
+                                    UpdatableIdentity, UpdatableTrustedContact,
+                                    UpdateAccountRequest)
 from alpaca.common.enums import BaseURL, SupportedCurrencies
 from alpaca.common.exceptions import APIError
 from alpaca.trading.enums import DTBPCheck, PDTCheck
-from alpaca.trading.models import AccountConfiguration as TradeAccountConfiguration
+from alpaca.trading.models import \
+    AccountConfiguration as TradeAccountConfiguration
 from tests.broker.factories import accounts as factory
 
 

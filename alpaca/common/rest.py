@@ -11,11 +11,9 @@ from requests import Session
 from requests.exceptions import HTTPError
 
 from alpaca import __version__
-from alpaca.common.constants import (
-    DEFAULT_RETRY_ATTEMPTS,
-    DEFAULT_RETRY_EXCEPTION_CODES,
-    DEFAULT_RETRY_WAIT_SECONDS,
-)
+from alpaca.common.constants import (DEFAULT_RETRY_ATTEMPTS,
+                                     DEFAULT_RETRY_EXCEPTION_CODES,
+                                     DEFAULT_RETRY_WAIT_SECONDS)
 from alpaca.common.exceptions import APIError, RetryException
 from alpaca.common.types import Credentials, HTTPResult, RawData
 

@@ -2,19 +2,12 @@ from typing import Iterator
 from uuid import UUID
 
 from alpaca.broker.client import BrokerClient
-from alpaca.broker.enums import (
-    ACHRelationshipStatus,
-    IdentifierType,
-    TransferDirection,
-    TransferTiming,
-)
+from alpaca.broker.enums import (ACHRelationshipStatus, IdentifierType,
+                                 TransferDirection, TransferTiming)
 from alpaca.broker.models import ACHRelationship, Bank, Transfer
-from alpaca.broker.requests import (
-    CreateACHRelationshipRequest,
-    CreateACHTransferRequest,
-    CreateBankRequest,
-    GetTransfersRequest,
-)
+from alpaca.broker.requests import (CreateACHRelationshipRequest,
+                                    CreateACHTransferRequest,
+                                    CreateBankRequest, GetTransfersRequest)
 from alpaca.common.enums import BaseURL, PaginationType
 
 
