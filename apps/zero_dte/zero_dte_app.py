@@ -286,11 +286,14 @@ def _execute_trade_and_update(target, args, cfg) -> None:
 
 
 def handle_signal(signum, frame):
+
     logging.info("Received signal %s; shutting down gracefully...", signum)
     type_shutdown.set()
 
 
+
 class Settings(BaseSettings):
+
     DAILY_PROFIT_TARGET: float = Field(
         0.0, description="Stop trading once we’ve made $X today (0 to disable)"
     )
@@ -347,6 +350,49 @@ class Settings(BaseSettings):
             return v
         else:
             raise ValueError("UNDERLYING must be a string or list of strings")
+
+    # Grid/back-test friendly aliases (lower-case snake-case)
+    TARGET_PCT: float | None = Field(
+        None,
+        alias="target_pct",
+        description="Profit target percent (alias for PROFIT_TARGET_PCT).  If provided it overrides PROFIT_TARGET_PCT so grid_backtest can pass lowercase keys without caring about internal field names.",
+    )
+    STOP_PCT: float | None = Field(
+        None,
+        alias="stop_pct",
+        description="Stop loss percent (alias for STOP_LOSS_PCT).  Must be lower than TARGET_PCT.",
+    )
+
+    # Builder specific helpers
+    WING_WIDTH: float | None = Field(
+        None,
+        alias="wing_width",
+        description="Wing width (strike spacing) used by credit/debit spread builders.",
+    )
+    DELTA_TARGET: float | None = Field(
+        None,
+        alias="delta_target",
+        description="Option delta target used by builders to pick short strike (e.g. 0.15 = 15Δ).",
+    )
+
+    # ------------------------------------------------------------------
+    # Alias consolidation & sanity checks (executed after model init)
+    # ------------------------------------------------------------------
+    @model_validator(mode="after")
+    def _apply_aliases(cls, values):
+        # 1. Merge alias fields into canonical ones
+        tgt = values.TARGET_PCT
+        if tgt is not None:
+            values.PROFIT_TARGET_PCT = tgt
+        stp = values.STOP_PCT
+        if stp is not None:
+            values.STOP_LOSS_PCT = stp
+        # 2. Ensure stop < target
+        if values.STOP_LOSS_PCT >= values.PROFIT_TARGET_PCT:
+            raise ValueError("STOP_PCT/STOP_LOSS_PCT must be less than TARGET_PCT/PROFIT_TARGET_PCT")
+        # 3. Wing width / delta target holes are fine – builders handle defaults
+        return values
+
 
     QTY: int = Field(10, description="Number of contracts per leg")
     PROFIT_TARGET_PCT: float = Field(
@@ -420,6 +466,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        populate_by_name = True
 
     @field_validator("EXIT_CUTOFF", mode="before")
     def parse_exit_time(cls, v):
