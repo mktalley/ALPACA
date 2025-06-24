@@ -1,12 +1,11 @@
-from alpaca.trading.enums import OrderSide, OrderType, TimeInForce, OrderClass
-from alpaca.trading.requests import (
-    MarketOrderRequest,
-    TrailingStopOrderRequest,
-    LimitOrderRequest,
-    OptionLegRequest,
-)
-import pytest
 import warnings
+
+import pytest
+
+from alpaca.trading.enums import OrderClass, OrderSide, OrderType, TimeInForce
+from alpaca.trading.requests import (LimitOrderRequest, MarketOrderRequest,
+                                     OptionLegRequest,
+                                     TrailingStopOrderRequest)
 
 
 def test_has_qty_or_notional_but_not_both():

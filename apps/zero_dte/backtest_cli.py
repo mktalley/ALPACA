@@ -5,6 +5,7 @@ before modules, so `apps.zero_dte.backtest` refers to the *package* rather than
 `backtest.py`.  We expose an alias module with a `main()` that boots the real
 CLI from the neighbouring *file* to keep backwards-compatibility.
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -25,4 +26,3 @@ _spec.loader.exec_module(_cli_mod)  # type: ignore[arg-type]
 main = getattr(_cli_mod, "main", None)
 if main is None:  # pragma: no cover
     raise ImportError("backtest.py does not define a 'main' callable")
-

@@ -12,8 +12,10 @@ Example:
 
 """
 import argparse
-from apps.zero_dte.zero_dte_app import Settings
 from threading import Event
+
+from apps.zero_dte.zero_dte_app import Settings
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -56,12 +58,18 @@ def main():
     start_equity = args.start
     current_equity = args.current
 
-    drawdown_pct = (start_equity - current_equity) / start_equity if start_equity > 0 else 0
-    profit_pct = (current_equity - start_equity) / start_equity if start_equity > 0 else 0
+    drawdown_pct = (
+        (start_equity - current_equity) / start_equity if start_equity > 0 else 0
+    )
+    profit_pct = (
+        (current_equity - start_equity) / start_equity if start_equity > 0 else 0
+    )
 
     print(f"Start equity: {start_equity:.2f}")
     print(f"Current equity: {current_equity:.2f}")
-    print(f"Drawdown: {drawdown_pct*100:.2f}% (threshold {cfg.DAILY_DRAWDOWN_PCT*100:.2f}%)")
+    print(
+        f"Drawdown: {drawdown_pct*100:.2f}% (threshold {cfg.DAILY_DRAWDOWN_PCT*100:.2f}%)"
+    )
     print(f"Profit: {profit_pct*100:.2f}% (threshold {cfg.DAILY_PROFIT_PCT*100:.2f}%)")
 
     if cfg.DAILY_DRAWDOWN_PCT > 0 and drawdown_pct >= cfg.DAILY_DRAWDOWN_PCT:
@@ -74,5 +82,6 @@ def main():
     else:
         print("=> Profit trigger would NOT fire.")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

@@ -1,8 +1,10 @@
 import json
-from alpaca.common.enums import BaseURL
-from alpaca.trading.models import TradeAccount, AccountConfiguration
-from alpaca.trading.client import TradingClient
+
 from requests_mock import Mocker
+
+from alpaca.common.enums import BaseURL
+from alpaca.trading.client import TradingClient
+from alpaca.trading.models import AccountConfiguration, TradeAccount
 
 
 def test_get_account(reqmock: Mocker, trading_client: TradingClient):

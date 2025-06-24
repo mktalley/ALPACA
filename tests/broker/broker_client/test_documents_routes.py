@@ -8,13 +8,12 @@ from typing import List
 import pytest
 
 from alpaca.broker.client import BrokerClient
-from alpaca.broker.enums import DocumentType, TradeDocumentType, UploadDocumentMimeType
+from alpaca.broker.enums import (DocumentType, TradeDocumentType,
+                                 UploadDocumentMimeType)
 from alpaca.broker.models import TradeDocument, W8BenDocument
-from alpaca.broker.requests import (
-    GetTradeDocumentsRequest,
-    UploadDocumentRequest,
-    UploadW8BenDocumentRequest,
-)
+from alpaca.broker.requests import (GetTradeDocumentsRequest,
+                                    UploadDocumentRequest,
+                                    UploadW8BenDocumentRequest)
 from alpaca.common.constants import BROKER_DOCUMENT_UPLOAD_LIMIT
 from alpaca.common.enums import BaseURL
 

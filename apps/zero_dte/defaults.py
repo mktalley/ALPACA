@@ -1,8 +1,9 @@
 """Default parameter grid and helpers for 0-DTE back-tests."""
+
 from __future__ import annotations
 
 import itertools
-from typing import Dict, List, Any
+from typing import Any, Dict, List
 
 # You can tune these lists – they are the first levers most traders adjust.
 DEFAULT_PARAM_GRID: Dict[str, List[Any]] = {

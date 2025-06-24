@@ -1,29 +1,19 @@
 import warnings
 from uuid import UUID
+
 import pytest
 
 from alpaca.common.enums import BaseURL
 from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import (
-    OrderClass,
-    OrderSide,
-    OrderStatus,
-    PositionIntent,
-    TimeInForce,
-)
+from alpaca.trading.enums import (OrderClass, OrderSide, OrderStatus,
+                                  PositionIntent, TimeInForce)
 from alpaca.trading.models import Order
-from alpaca.trading.requests import (
-    CancelOrderResponse,
-    GetOrderByIdRequest,
-    GetOrdersRequest,
-    LimitOrderRequest,
-    MarketOrderRequest,
-    OptionLegRequest,
-    ReplaceOrderRequest,
-    StopLossRequest,
-    TakeProfitRequest,
-)
+from alpaca.trading.requests import (CancelOrderResponse, GetOrderByIdRequest,
+                                     GetOrdersRequest, LimitOrderRequest,
+                                     MarketOrderRequest, OptionLegRequest,
+                                     ReplaceOrderRequest, StopLossRequest,
+                                     TakeProfitRequest)
 
 
 def test_market_order(reqmock, trading_client):

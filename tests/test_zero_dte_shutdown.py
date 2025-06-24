@@ -1,7 +1,7 @@
 import pytest
 
 import apps.zero_dte.zero_dte_app as z
-from apps.zero_dte.zero_dte_app import _execute_trade_and_update, Settings
+from apps.zero_dte.zero_dte_app import Settings, _execute_trade_and_update
 
 
 class DummyClient:
@@ -49,4 +49,6 @@ def test_no_liquidation_if_within_drawdown():
 
     # No liquidation and no shutdown for small drawdown
     assert not client.closed, "Expected no liquidation for drawdown below threshold"
-    assert not z.type_shutdown.is_set(), "Expected no shutdown event for drawdown below threshold"
+    assert (
+        not z.type_shutdown.is_set()
+    ), "Expected no shutdown event for drawdown below threshold"

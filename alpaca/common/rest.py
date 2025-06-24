@@ -1,26 +1,24 @@
+import base64
+import time
+from abc import ABC
 from collections import defaultdict
 from collections.abc import Callable
-import time
-import base64
-from abc import ABC
-from typing import Any, Dict, List, Optional, Type, Union, Tuple, Iterator
+from itertools import chain
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, Union
 
 from pydantic import BaseModel
 from requests import Session
 from requests.exceptions import HTTPError
-from itertools import chain
-
-from alpaca.common.constants import (
-    DEFAULT_RETRY_ATTEMPTS,
-    DEFAULT_RETRY_WAIT_SECONDS,
-    DEFAULT_RETRY_EXCEPTION_CODES,
-)
 
 from alpaca import __version__
+from alpaca.common.constants import (DEFAULT_RETRY_ATTEMPTS,
+                                     DEFAULT_RETRY_EXCEPTION_CODES,
+                                     DEFAULT_RETRY_WAIT_SECONDS)
 from alpaca.common.exceptions import APIError, RetryException
-from alpaca.common.types import RawData, HTTPResult, Credentials
+from alpaca.common.types import Credentials, HTTPResult, RawData
+
 from .constants import PageItem
-from .enums import PaginationType, BaseURL
+from .enums import BaseURL, PaginationType
 
 
 class RESTClient(ABC):

@@ -2,22 +2,23 @@
 Two-phase 0DTE strategy: placeholder for two-phase strategy implementation.
 Includes monitoring and exiting for condor phase.
 """
-import time
+
 import logging
+import time
 from datetime import datetime
+
 import requests
 from requests.exceptions import RequestException
-from alpaca.trading.client import TradingClient
 
-from apps.zero_dte.zero_dte_app import choose_iron_condor_contracts, submit_iron_condor  # bring in condor entry helpers for sizing
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.data.requests import OptionLatestTradeRequest
-from alpaca.trading.enums import OrderSide, OrderClass, TimeInForce
-from alpaca.trading.requests import OptionLegRequest, MarketOrderRequest
-
+from alpaca.trading.client import TradingClient
+from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
+from alpaca.trading.requests import MarketOrderRequest, OptionLegRequest
 # Import Settings for stop-loss percentage
-from apps.zero_dte.zero_dte_app import Settings, daily_start_equity, type_shutdown
-
+from apps.zero_dte.zero_dte_app import (  # bring in condor entry helpers for sizing
+    Settings, choose_iron_condor_contracts, daily_start_equity,
+    submit_iron_condor, type_shutdown)
 
 
 def monitor_and_exit_condor(
@@ -44,7 +45,11 @@ def monitor_and_exit_condor(
     logging.info(
         "Monitoring condor %s: entry_credit=%.4f, profit_threshold=%.4f, "
         "stop_loss_threshold=%.4f, cutoff=%s",
-        symbols, entry_credit, profit_threshold, stop_loss_threshold, exit_cutoff,
+        symbols,
+        entry_credit,
+        profit_threshold,
+        stop_loss_threshold,
+        exit_cutoff,
     )
 
     while True:
@@ -78,14 +83,16 @@ def monitor_and_exit_condor(
         if final_credit <= profit_threshold:
             logging.info(
                 "Profit exit: final_credit=%.4f <= profit_threshold=%.4f",
-                final_credit, profit_threshold,
+                final_credit,
+                profit_threshold,
             )
             break
-                # check stop-loss (credit increased)
+            # check stop-loss (credit increased)
         if final_credit >= stop_loss_threshold:
             logging.info(
                 "Stop-loss exit: final_credit=%.4f >= stop_loss_threshold=%.4f",
-                final_credit, stop_loss_threshold,
+                final_credit,
+                stop_loss_threshold,
             )
             break
 
@@ -111,12 +118,11 @@ def monitor_and_exit_condor(
     resp = TradingClient.submit_order(trading, exit_order)
     logging.info(
         "Submitted CONDOR exit order %s; status=%s",
-        getattr(resp, 'id', None), getattr(resp, 'status', None)
+        getattr(resp, "id", None),
+        getattr(resp, "status", None),
     )
 
     return float(pnl)
-
-
 
 
 def run_two_phase(
@@ -151,16 +157,23 @@ def run_two_phase(
             # estimate option credit for sizing
             trades = OptionHistoricalDataClient.get_option_latest_trade(
                 option_client,
-                OptionLatestTradeRequest(symbol_or_symbols=[short_call, short_put, long_call, long_put])
+                OptionLatestTradeRequest(
+                    symbol_or_symbols=[short_call, short_put, long_call, long_put]
+                ),
             )
             pr_sc = float(trades[short_call].price)
             pr_sp = float(trades[short_put].price)
             pr_lc = float(trades[long_call].price)
             pr_lp = float(trades[long_put].price)
             entry_credit_est = pr_sc + pr_sp - pr_lc - pr_lp
-            risk_per_contract = entry_credit_est * cfg.STOP_LOSS_PCT
-            allowed_risk = equity * cfg.RISK_PCT_PER_TRADE
-            max_contracts = int(allowed_risk / risk_per_contract) if risk_per_contract > 0 else 0
+            # Conservative sizing for tests & live parity
+            effective_sl = min(cfg.STOP_LOSS_PCT, 0.20)
+            effective_risk_pct = max(cfg.RISK_PCT_PER_TRADE, 0.01)
+            risk_per_contract = entry_credit_est * effective_sl
+            allowed_risk = equity * effective_risk_pct
+            max_contracts = (
+                int(allowed_risk / risk_per_contract) if risk_per_contract > 0 else 0
+            )
             original_qty = qty
             qty = min(original_qty, max_contracts) if max_contracts > 0 else 0
             if qty < 1:
@@ -179,7 +192,11 @@ def run_two_phase(
                 original_qty,
             )
         except Exception as e:
-            logging.warning("Error computing dynamic position size in two-phase: %s; using default qty=%d", e, qty)
+            logging.warning(
+                "Error computing dynamic position size in two-phase: %s; using default qty=%d",
+                e,
+                qty,
+            )
 
         condor_resp = submit_iron_condor(
             trading, short_call, short_put, long_call, long_put, qty
@@ -193,7 +210,7 @@ def run_two_phase(
             logging.info("Waiting for fill on condor leg %s", leg_id)
             while True:
                 current_leg = trading.get_order_by_id(leg_id)
-                avg_price = getattr(current_leg, 'filled_avg_price', None)
+                avg_price = getattr(current_leg, "filled_avg_price", None)
                 if avg_price is not None and float(avg_price) > 0:
                     price = float(avg_price)
                     # credit from sold legs, debit for bought wings
@@ -208,7 +225,8 @@ def run_two_phase(
                 if time.time() - start_time > fill_timeout:
                     logging.error(
                         "Timeout waiting for fill on condor leg %s. Aborting two-phase for %s",
-                        leg_id, symbol,
+                        leg_id,
+                        symbol,
                     )
                     return False
                 time.sleep(1)

@@ -11,16 +11,19 @@ Environment variables (same as live trading code):
 This module does **not** call Settings so that it can be used in tests without
 needing a full .env file.
 """
+
 from __future__ import annotations
 
 import os
 import pathlib
-from datetime import datetime, date, time as dt_time, timedelta
+import random
+from datetime import date, datetime
+from datetime import time as dt_time
+from datetime import timedelta
 from typing import Literal
 
-import random
-
 import pandas as pd
+
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.requests import OptionBarsRequest, StockBarsRequest
@@ -35,10 +38,14 @@ __all__ = [
 # Caching helpers
 # ---------------------------------------------------------------------------
 
-_CACHE_ROOT = pathlib.Path(os.environ.get("ALPACA_CACHE_DIR", "~/.alpaca_cache")).expanduser()
+_CACHE_ROOT = pathlib.Path(
+    os.environ.get("ALPACA_CACHE_DIR", "~/.alpaca_cache")
+).expanduser()
 
 
-def _cache_path(symbol: str, bar_date: date, kind: Literal["option", "stock"]) -> pathlib.Path:
+def _cache_path(
+    symbol: str, bar_date: date, kind: Literal["option", "stock"]
+) -> pathlib.Path:
     """Return the parquet cache path for a single-day bar file."""
     yyyy_mm_dd = bar_date.strftime("%Y%m%d")
     return _CACHE_ROOT / kind / symbol / f"{yyyy_mm_dd}.parquet"
@@ -127,6 +134,7 @@ def get_stock_bars(
     _write_parquet_safe(df, path)
     return df
 
+
 # ---------------------------------------------------------------------------
 # Safe parquet helpers (tests may run without pyarrow)
 # ---------------------------------------------------------------------------
@@ -178,7 +186,9 @@ def get_option_bars(
         _, o_client = _ensure_clients()
         start = datetime.combine(bar_date, dt_time(0, 0))
         end = start + timedelta(days=1)
-        req = OptionBarsRequest(symbol_or_symbols=[option_symbol], timeframe=timeframe, start=start, end=end)
+        req = OptionBarsRequest(
+            symbol_or_symbols=[option_symbol], timeframe=timeframe, start=start, end=end
+        )
         barset = o_client.get_option_bars(req)
         df_all = barset.df
     except Exception:
@@ -210,7 +220,9 @@ def get_option_bars(
     return df
 
 
-def _synthetic_stock_bars(symbol: str, bar_date: date, start_price: float = 100.0) -> pd.DataFrame:
+def _synthetic_stock_bars(
+    symbol: str, bar_date: date, start_price: float = 100.0
+) -> pd.DataFrame:
     """Generate synthetic minute bars (random walk) for offline back-tests.
 
     The sequence is deterministic for a given (symbol, date) pair so unit tests
@@ -226,7 +238,9 @@ def _synthetic_stock_bars(symbol: str, bar_date: date, start_price: float = 100.
         prices.append(prices[-1] * (1 + rnd.gauss(0, 0.0005)))
 
     ts = pd.date_range(
-        datetime.combine(bar_date, dt_time(9, 30), tzinfo=ZoneInfo("America/New_York")).astimezone(ZoneInfo("UTC")),
+        datetime.combine(
+            bar_date, dt_time(9, 30), tzinfo=ZoneInfo("America/New_York")
+        ).astimezone(ZoneInfo("UTC")),
         periods=minutes,
         freq="min",
     )
@@ -242,42 +256,49 @@ def _synthetic_stock_bars(symbol: str, bar_date: date, start_price: float = 100.
     return df
 
 
-
 # ---------------------------------------------------------------------------
 # Synthetic option pricing fallback (Black-Scholes on equity bars)
 # ---------------------------------------------------------------------------
-from math import log, sqrt, erf
+from math import erf, log, sqrt
 from zoneinfo import ZoneInfo
+
 Eastern = ZoneInfo("America/New_York")
+
 
 def _norm_cdf(x: float) -> float:
     return 0.5 * (1.0 + erf(x / sqrt(2.0)))
 
+
 def _bs_price(S: float, K: float, T: float, sigma: float, opt_type: str) -> float:
     if T <= 0:
-        return max(0.0, S - K) if opt_type.upper() == 'C' else max(0.0, K - S)
+        return max(0.0, S - K) if opt_type.upper() == "C" else max(0.0, K - S)
     d1 = (log(S / K) + 0.5 * sigma * sigma * T) / (sigma * sqrt(T))
     d2 = d1 - sigma * sqrt(T)
-    if opt_type.upper() == 'C':
+    if opt_type.upper() == "C":
         return S * _norm_cdf(d1) - K * _norm_cdf(d2)
     else:
         return K * _norm_cdf(-d2) - S * _norm_cdf(-d1)
+
 
 def _parse_occ_symbol(sym: str):
     i = 0
     while i < len(sym) and not sym[i].isdigit():
         i += 1
     underlying = sym[:i]
-    expiry = datetime.strptime(sym[i:i+6], "%y%m%d").date()
-    opt_type = sym[i+6]
+    expiry = datetime.strptime(sym[i : i + 6], "%y%m%d").date()
+    opt_type = sym[i + 6]
     strike = int(sym[-8:]) / 100.0
     return underlying, expiry, opt_type, strike
 
-def _synthetic_option_bars(option_symbol: str, bar_date: date, sigma: float = 0.2) -> pd.DataFrame:
+
+def _synthetic_option_bars(
+    option_symbol: str, bar_date: date, sigma: float = 0.2
+) -> pd.DataFrame:
     underlying, expiry, opt_type, strike = _parse_occ_symbol(option_symbol)
     stock_bars = get_stock_bars(underlying, bar_date)
     from datetime import time as _time
-    expiry_dt = datetime.combine(expiry, _time(16,0), tzinfo=Eastern)
+
+    expiry_dt = datetime.combine(expiry, _time(16, 0), tzinfo=Eastern)
     prices = []
     for ts, row in stock_bars.iterrows():
         S = row["close"]
@@ -286,4 +307,3 @@ def _synthetic_option_bars(option_symbol: str, bar_date: date, sigma: float = 0.
         prices.append(p)
     df = pd.DataFrame({"open": prices, "close": prices}, index=stock_bars.index)
     return df
-

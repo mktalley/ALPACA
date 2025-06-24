@@ -1,33 +1,18 @@
-import pytest
-from alpaca.trading.models import (
-    Clock,
-    Calendar,
-    CorporateActionAnnouncement,
-)
-from alpaca.trading.requests import (
-    ClosePositionRequest,
-    UpdateWatchlistRequest,
-)
-from datetime import datetime, date
+from datetime import date, datetime
 from uuid import UUID
-from alpaca.trading.enums import (
-    AssetClass,
-    AssetExchange,
-    OrderType,
-    OrderClass,
-    PositionIntent,
-    TimeInForce,
-    OrderSide,
-    PositionSide,
-    CorporateActionType,
-    CorporateActionSubType,
-)
-from alpaca.trading.models import (
-    Position,
-    ClosePositionResponse,
-    Order,
-)
+
+import pytest
 from factories import create_dummy_order
+
+from alpaca.trading.enums import (AssetClass, AssetExchange,
+                                  CorporateActionSubType, CorporateActionType,
+                                  OrderClass, OrderSide, OrderType,
+                                  PositionIntent, PositionSide, TimeInForce)
+from alpaca.trading.models import (Calendar, Clock, ClosePositionResponse,
+                                   CorporateActionAnnouncement, Order,
+                                   Position)
+from alpaca.trading.requests import (ClosePositionRequest,
+                                     UpdateWatchlistRequest)
 
 
 def test_clock_timestamps():

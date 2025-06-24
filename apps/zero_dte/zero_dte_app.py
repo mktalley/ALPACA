@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import sys
+
 import os
+import sys
+
 # Remove potentially invalid UNDERLYING env var to prevent parsing errors
 os.environ.pop("UNDERLYING", None)
 
@@ -9,10 +11,14 @@ os.environ.pop("UNDERLYING", None)
 file_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(file_dir, os.pardir, os.pardir))
 from pathlib import Path
+
 import yaml
+
 # During pytest, ignore YAML config to use class defaults
 if "PYTEST_CURRENT_TEST" in os.environ:
     os.environ.setdefault("SKIP_YAML_OVERRIDES", "1")
+
+
 # Load YAML overrides (config/zero_dte.yaml) into environment so pydantic Settings can see them.
 def _apply_yaml_overrides():
     if os.environ.get("SKIP_YAML_OVERRIDES") == "1":
@@ -32,6 +38,7 @@ def _apply_yaml_overrides():
         else:
             os.environ.setdefault(key, str(val))
 
+
 _apply_yaml_overrides()
 
 if project_root not in sys.path:
@@ -48,39 +55,40 @@ Designed for institutional clients:
   • Easy to extend to multi-leg (MLEG) or other underlyings
 """
 
-import time
-import logging
-from logging.handlers import TimedRotatingFileHandler
-from datetime import date, datetime, time as dt_time, timedelta
-from zoneinfo import ZoneInfo
-from typing import Dict, List
-import os
-import threading
-import signal  # for graceful shutdown
 import argparse
-import re  # regex for log analysis
+import logging
+import os
 # Configure timezone for Eastern Time logging
 import random  # for jittering anchor times
-os.environ['TZ'] = 'America/New_York'
+import re  # regex for log analysis
+import signal  # for graceful shutdown
+import threading
+import time
+from datetime import date, datetime
+from datetime import time as dt_time
+from datetime import timedelta
+from logging.handlers import TimedRotatingFileHandler
+from typing import Dict, List
+from zoneinfo import ZoneInfo
+
+os.environ["TZ"] = "America/New_York"
 time.tzset()
 daily_pnl: float = 0.0  # cumulative P&L for the trading day
 daily_start_equity: float = 0.0  # starting equity for the trading day
 
 import pydantic
 from pydantic import SecretStr
+
 # Workaround: alias Secret to SecretStr so pydantic-settings can import Secret
 pydantic.Secret = SecretStr
 
 
 import pandas as pd
-
-
-
-
 import pydantic
 from pydantic import SecretStr
+
 # Workaround: alias Secret to SecretStr so pydantic-settings can import Secret
-setattr(pydantic, 'Secret', SecretStr)
+setattr(pydantic, "Secret", SecretStr)
 
 # Prefer pydantic BaseSettings; fall back to pydantic_settings only if available without errors
 try:
@@ -89,24 +97,16 @@ try:
 except Exception:
     from pydantic import BaseSettings
 
-
-
 from pydantic import Field, field_validator, model_validator
 
+from alpaca.data.requests import (OptionLatestQuoteRequest,
+                                  OptionLatestTradeRequest,
+                                  OptionSnapshotRequest,
+                                  StockLatestTradeRequest)
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
-from alpaca.trading.requests import (
-
-    GetOptionContractsRequest,
-    MarketOrderRequest,
-    OptionLegRequest,
-)
-from alpaca.data.requests import (
-    StockLatestTradeRequest,
-    OptionLatestTradeRequest,
-    OptionLatestQuoteRequest,
-    OptionSnapshotRequest,
-)
+from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
+from alpaca.trading.requests import (GetOptionContractsRequest,
+                                     MarketOrderRequest, OptionLegRequest)
 
 # counters for monitoring filtered trades
 _spread_skipped_count: int = 0
@@ -130,17 +130,20 @@ def submit_complex_order(
     resp = TradingClient.submit_order(trading, order)
     logging.info(
         "Submitted COMPLEX order %s; status=%s",
-        getattr(resp, 'id', None),
-        getattr(resp, 'status', None),
+        getattr(resp, "id", None),
+        getattr(resp, "status", None),
     )
     return resp
 
 
-from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.historical.option import OptionHistoricalDataClient
+import math
+import statistics
 
-import math, requests, statistics
-from alpaca.data.requests import StockBarsRequest, OptionSnapshotRequest
+import requests
+
+from alpaca.data.historical.option import OptionHistoricalDataClient
+from alpaca.data.historical.stock import StockHistoricalDataClient
+from alpaca.data.requests import OptionSnapshotRequest, StockBarsRequest
 from alpaca.data.timeframe import TimeFrame
 
 # Placeholder for two-phase strategy; will import dynamically in main or be stubbed in tests
@@ -149,6 +152,7 @@ run_two_phase = None
 # Simple retry helper for external API calls with circuit breaker
 _failure_count = 0
 _circuit_open_until = 0.0
+
 
 def safe_api_call(func, *args, retries: int = 3, backoff: float = 1.0, **kwargs):
     """Call func(*args, **kwargs) with retries, exponential backoff on exception, and circuit breaker on repeated failures."""
@@ -169,19 +173,30 @@ def safe_api_call(func, *args, retries: int = 3, backoff: float = 1.0, **kwargs)
                 # after retry exhaustion, count a failure
                 _failure_count += 1
                 cfg = Settings()
-                threshold = getattr(cfg, 'FAILURE_THRESHOLD', 5)
-                cooldown = getattr(cfg, 'COOLDOWN_SEC', 300.0)
+                threshold = getattr(cfg, "FAILURE_THRESHOLD", 5)
+                cooldown = getattr(cfg, "COOLDOWN_SEC", 300.0)
                 if _failure_count >= threshold:
                     _circuit_open_until = now + cooldown
                     logging.critical(
-                        "Circuit breaker tripped for %s: pausing API calls for %.1fs", func.__name__, cooldown
+                        "Circuit breaker tripped for %s: pausing API calls for %.1fs",
+                        func.__name__,
+                        cooldown,
                     )
-                logging.error("API call %s failed after %d attempts: %s", func.__name__, retries, e)
+                logging.error(
+                    "API call %s failed after %d attempts: %s",
+                    func.__name__,
+                    retries,
+                    e,
+                )
                 raise
             delay = backoff * (2 ** (attempt - 1))
             logging.warning(
                 "API call %s failed on attempt %d/%d: %s – retrying in %.1fs",
-                func.__name__, attempt, retries, e, delay,
+                func.__name__,
+                attempt,
+                retries,
+                e,
+                delay,
             )
             time.sleep(delay)
             continue
@@ -194,6 +209,7 @@ def safe_api_call(func, *args, retries: int = 3, backoff: float = 1.0, **kwargs)
 # Global shutdown event
 type_shutdown = threading.Event()
 
+
 # Helper to update and check daily P&L thresholds
 def _update_daily_pnl(pnl: float, cfg) -> None:
     global daily_pnl
@@ -201,13 +217,23 @@ def _update_daily_pnl(pnl: float, cfg) -> None:
     logging.info("Updated DAILY P&L: %.4f", daily_pnl)
     # Check thresholds
     if cfg.DAILY_PROFIT_TARGET > 0 and daily_pnl >= cfg.DAILY_PROFIT_TARGET:
-        logging.info("Daily profit target reached (%.4f >= %.4f); shutting down further trades.", daily_pnl, cfg.DAILY_PROFIT_TARGET)
+        logging.info(
+            "Daily profit target reached (%.4f >= %.4f); shutting down further trades.",
+            daily_pnl,
+            cfg.DAILY_PROFIT_TARGET,
+        )
         type_shutdown.set()
     if cfg.DAILY_LOSS_LIMIT > 0 and daily_pnl <= -cfg.DAILY_LOSS_LIMIT:
-        logging.info("Daily loss limit reached (%.4f <= -%.4f); shutting down further trades.", daily_pnl, cfg.DAILY_LOSS_LIMIT)
+        logging.info(
+            "Daily loss limit reached (%.4f <= -%.4f); shutting down further trades.",
+            daily_pnl,
+            cfg.DAILY_LOSS_LIMIT,
+        )
         type_shutdown.set()
 
+
 # Graceful shutdown handler
+
 
 # Wrapper to execute trade function and update daily P&L
 def _execute_trade_and_update(target, args, cfg) -> None:
@@ -215,12 +241,16 @@ def _execute_trade_and_update(target, args, cfg) -> None:
     try:
         result = target(*args)
         if result is None:
-            logging.warning("Trade %s returned None; cannot compute P&L", target.__name__)
+            logging.warning(
+                "Trade %s returned None; cannot compute P&L", target.__name__
+            )
             return
         try:
             pnl_val = float(result)
         except (TypeError, ValueError):
-            logging.warning("Trade %s returned non-numeric result: %s", target.__name__, result)
+            logging.warning(
+                "Trade %s returned non-numeric result: %s", target.__name__, result
+            )
             return
         _update_daily_pnl(pnl_val, cfg)
 
@@ -240,37 +270,69 @@ def _execute_trade_and_update(target, args, cfg) -> None:
                     trading_client.close_all_positions()
                     logging.info("All open positions closed due to drawdown limit.")
                 except Exception as e:
-                    logging.error("Error closing positions on drawdown: %s", e, exc_info=True)
+                    logging.error(
+                        "Error closing positions on drawdown: %s", e, exc_info=True
+                    )
                 type_shutdown.set()
     except Exception as e:
         logging.error("Error executing trade %s: %s", target.__name__, e, exc_info=True)
         return
+
 
 def handle_signal(signum, frame):
     logging.info("Received signal %s; shutting down gracefully...", signum)
     type_shutdown.set()
 
 
-
-
 class Settings(BaseSettings):
-    DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
-    DAILY_LOSS_LIMIT:    float = Field(0.0, description="Stop trading once we’ve lost $X today (0 to disable)")
-    DAILY_DRAWDOWN_PCT: float = Field(0.03, description="Stop trading if cumulative drawdown >= X% of starting equity (default 3%)")
-    GAP_THRESHOLD_PCT: float = Field(0.006, description="Overnight gap ≥ this fraction triggers gap logic (e.g. 0.006 = 0.6%)")
-    REVERSE_RETRACE_MAX: float = Field(0.35, description="Max % retrace of gap we allow and still call it gap-and-go")
-    OPEN_VOL_MULTIPLIER: float = Field(1.5, description="Opening 5-min volume must exceed this × 20-day avg to confirm gap-and-go", validate_default=False)
-    SKEW_DELTA_NEAR: float = Field(0.10, description="Approx delta for threatened short strike on skewed strangle")
-    SKEW_DELTA_FAR: float = Field(0.03, description="Approx delta for safe far strike on skewed side")
-    SKIP_ON_GAP_AND_GO: bool = Field(False, description="If True we do not trade on confirmed gap-and-go days")
-    SHORT_DELTA_STOP: float = Field(0.25, description="Exit trade early if abs(short strike delta) exceeds this")
-    DAILY_PROFIT_PCT: float = Field(0.0, description="Stop trading and liquidate when account equity increases by X% intraday (0 to disable)")
+    DAILY_PROFIT_TARGET: float = Field(
+        0.0, description="Stop trading once we’ve made $X today (0 to disable)"
+    )
+    DAILY_LOSS_LIMIT: float = Field(
+        0.0, description="Stop trading once we’ve lost $X today (0 to disable)"
+    )
+    DAILY_DRAWDOWN_PCT: float = Field(
+        0.03,
+        description="Stop trading if cumulative drawdown >= X% of starting equity (default 3%)",
+    )
+    GAP_THRESHOLD_PCT: float = Field(
+        0.006,
+        description="Overnight gap ≥ this fraction triggers gap logic (e.g. 0.006 = 0.6%)",
+    )
+    REVERSE_RETRACE_MAX: float = Field(
+        0.35, description="Max % retrace of gap we allow and still call it gap-and-go"
+    )
+    OPEN_VOL_MULTIPLIER: float = Field(
+        1.5,
+        description="Opening 5-min volume must exceed this × 20-day avg to confirm gap-and-go",
+        validate_default=False,
+    )
+    SKEW_DELTA_NEAR: float = Field(
+        0.10, description="Approx delta for threatened short strike on skewed strangle"
+    )
+    SKEW_DELTA_FAR: float = Field(
+        0.03, description="Approx delta for safe far strike on skewed side"
+    )
+    SKIP_ON_GAP_AND_GO: bool = Field(
+        False, description="If True we do not trade on confirmed gap-and-go days"
+    )
+    SHORT_DELTA_STOP: float = Field(
+        0.25, description="Exit trade early if abs(short strike delta) exceeds this"
+    )
+    DAILY_PROFIT_PCT: float = Field(
+        0.0,
+        description="Stop trading and liquidate when account equity increases by X% intraday (0 to disable)",
+    )
 
     ALPACA_API_KEY: str = ""
     ALPACA_API_SECRET: str = ""
     PAPER: bool = True
 
-    UNDERLYING: List[str] = Field(["SPY"], description="Comma-separated list of underlying symbols to trade options on")
+    UNDERLYING: List[str] = Field(
+        ["SPY"],
+        description="Comma-separated list of underlying symbols to trade options on",
+    )
+
     @field_validator("UNDERLYING", mode="before")
     def split_underlying(cls, v):
         if isinstance(v, str):
@@ -279,6 +341,7 @@ class Settings(BaseSettings):
             return v
         else:
             raise ValueError("UNDERLYING must be a string or list of strings")
+
     QTY: int = Field(10, description="Number of contracts per leg")
     PROFIT_TARGET_PCT: float = Field(
         0.65, description="Profit target as a percent of entry price (e.g. 0.65 = 65%)"
@@ -303,21 +366,23 @@ class Settings(BaseSettings):
         0.10, description="Minimum implied volatility required (e.g. 0.10 = 10%)"
     )
 
-    @model_validator(mode='after')
+    @model_validator(mode="after")
     def validate_thresholds(cls, values):
         if values.STOP_LOSS_PCT >= values.PROFIT_TARGET_PCT:
             raise ValueError("STOP_LOSS_PCT must be less than PROFIT_TARGET_PCT")
         if not (0 < values.RISK_PCT_PER_TRADE < 1):
             raise ValueError("RISK_PCT_PER_TRADE must be between 0 and 1")
         if not (0 < values.SKEW_DELTA_FAR < values.SKEW_DELTA_NEAR < 1):
-            raise ValueError("SKEW_DELTA_NEAR must be > SKEW_DELTA_FAR and both in (0,1)")
+            raise ValueError(
+                "SKEW_DELTA_NEAR must be > SKEW_DELTA_FAR and both in (0,1)"
+            )
         if values.SHORT_DELTA_STOP <= values.SKEW_DELTA_NEAR:
             raise ValueError("SHORT_DELTA_STOP must exceed SKEW_DELTA_NEAR")
         return values
 
-
     CONDOR_TARGET_PCT: float = Field(
-        0.25, description="Profit target as a percent for the condor phase in two-phase strategy"
+        0.25,
+        description="Profit target as a percent for the condor phase in two-phase strategy",
     )
     CONDOR_WING_SPREAD: int = Field(
         2, description="Wing width in strikes for the condor phase"
@@ -325,10 +390,12 @@ class Settings(BaseSettings):
 
     MAX_TRADES: int = Field(15, description="Maximum number of strangle trades per day")
     EVENT_MOVE_PCT: float = Field(
-        0.0015, description="Price move percent to trigger event trades (e.g. 0.0015 = 0.15%)"
+        0.0015,
+        description="Price move percent to trigger event trades (e.g. 0.0015 = 0.15%)",
     )
     ANCHOR_MOVE_PCT_MAX: float = Field(
-        0.006, description="Max 09:30-10:00 price range to allow anchor entries (e.g. 0.006 = 0.6%)"
+        0.006,
+        description="Max 09:30-10:00 price range to allow anchor entries (e.g. 0.006 = 0.6%)",
     )
     IV_RANK_THRESHOLD: float = Field(
         0.5, description="Maximum allowed IV rank (0-1) for anchor and event trades"
@@ -355,7 +422,6 @@ class Settings(BaseSettings):
         return v
 
 
-
 # Instantiate global configuration once for runtime modules
 cfg = Settings()
 
@@ -368,9 +434,9 @@ def setup_logging():
     """
     # Prepare log directory
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    logs_dir = os.path.join(root, 'logs')
+    logs_dir = os.path.join(root, "logs")
     os.makedirs(logs_dir, exist_ok=True)
-    log_path = os.path.join(logs_dir, 'zero_dte.log')
+    log_path = os.path.join(logs_dir, "zero_dte.log")
 
     # Get root logger and clear existing handlers
     logger = logging.getLogger()
@@ -381,18 +447,23 @@ def setup_logging():
     # Console handler: DEBUG and above
     stream_handler = logging.StreamHandler(sys.stdout)
     stream_handler.setLevel(logging.DEBUG)
-    stream_handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S %Z%z"
-    ))
+    stream_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S %Z%z",
+        )
+    )
     logger.addHandler(stream_handler)
 
     # File handler: INFO and above, rotate daily, keep 7 days
     file_handler = TimedRotatingFileHandler(
-        filename=log_path, when='midnight', interval=1,
-        backupCount=7, encoding='utf-8'
+        filename=log_path, when="midnight", interval=1, backupCount=7, encoding="utf-8"
     )
-def detect_gap_and_go(stock_client: StockHistoricalDataClient, symbol: str, cfg: Settings) -> str | None:
+
+
+def detect_gap_and_go(
+    stock_client: StockHistoricalDataClient, symbol: str, cfg: Settings
+) -> str | None:
     """Return 'bullish', 'bearish', or None if no gap-and-go pattern detected."""
     try:
         et = ZoneInfo("America/New_York")
@@ -401,7 +472,12 @@ def detect_gap_and_go(stock_client: StockHistoricalDataClient, symbol: str, cfg:
         # fetch previous daily bar (may need loop over weekends/holidays)
         for _ in range(5):
             bars_prev = stock_client.get_stock_bars(
-                StockBarsRequest(symbol_or_symbols=[symbol], timeframe=TimeFrame.Day, start=prev, end=prev)
+                StockBarsRequest(
+                    symbol_or_symbols=[symbol],
+                    timeframe=TimeFrame.Day,
+                    start=prev,
+                    end=prev,
+                )
             )
             if bars_prev and bars_prev[symbol]:
                 prev_close = bars_prev[symbol][0].close
@@ -414,7 +490,12 @@ def detect_gap_and_go(stock_client: StockHistoricalDataClient, symbol: str, cfg:
         start_dt = datetime.combine(today, dt_time(9, 30), tzinfo=et)
         end_dt = start_dt + timedelta(minutes=16)
         bars_open = stock_client.get_stock_bars(
-            StockBarsRequest(symbol_or_symbols=[symbol], timeframe=TimeFrame.Minute, start=start_dt, end=end_dt)
+            StockBarsRequest(
+                symbol_or_symbols=[symbol],
+                timeframe=TimeFrame.Minute,
+                start=start_dt,
+                end=end_dt,
+            )
         )
         if not bars_open or not bars_open[symbol]:
             return None
@@ -444,44 +525,52 @@ def detect_gap_and_go(stock_client: StockHistoricalDataClient, symbol: str, cfg:
 
     file_handler.suffix = "%Y-%m-%d"
     file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S %Z%z"
-    ))
+    file_handler.setFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)-8s [%(threadName)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S %Z%z",
+        )
+    )
     logger.addHandler(file_handler)
-
-
 
 
 def get_underlying_price(stock_client: StockHistoricalDataClient, symbol: str) -> float:
     """Fetch latest spot price with retries."""
     resp = safe_api_call(
         stock_client.get_stock_latest_trade,
-        StockLatestTradeRequest(symbol_or_symbols=[symbol])
+        StockLatestTradeRequest(symbol_or_symbols=[symbol]),
     )
     trade = resp[symbol]
     return float(trade.price)
+
 
 # ---------------------------------------------------------------------------
 # Volatility helpers
 # ---------------------------------------------------------------------------
 
-def _morning_move_pct(stock_client: StockHistoricalDataClient, symbol: str, ref_date: date | None = None) -> float:
+
+def _morning_move_pct(
+    stock_client: StockHistoricalDataClient, symbol: str, ref_date: date | None = None
+) -> float:
     """Return 09:30–10:00 ET high-low range as percent of 09:30 open."""
     if ref_date is None:
         ref_date = date.today()
     tz = ZoneInfo("America/New_York")
     start_et = datetime.combine(ref_date, dt_time(9, 30), tzinfo=tz)
-    end_et   = datetime.combine(ref_date, dt_time(10, 0), tzinfo=tz)
-    start_utc= start_et.astimezone(ZoneInfo("UTC"))
-    end_utc  = end_et.astimezone(ZoneInfo("UTC"))
+    end_et = datetime.combine(ref_date, dt_time(10, 0), tzinfo=tz)
+    start_utc = start_et.astimezone(ZoneInfo("UTC"))
+    end_utc = end_et.astimezone(ZoneInfo("UTC"))
     bars = safe_api_call(
         stock_client.get_stock_bars,
-        StockBarsRequest(symbol_or_symbols=[symbol], timeframe=TimeFrame.Minute, start=start_utc, end=end_utc)
+        StockBarsRequest(
+            symbol_or_symbols=[symbol],
+            timeframe=TimeFrame.Minute,
+            start=start_utc,
+            end=end_utc,
+        ),
     ).df
     if bars.empty:
         return 0.0
-
 
     if isinstance(bars.index, pd.MultiIndex):
         bars = bars.xs(symbol, level="symbol")
@@ -489,7 +578,11 @@ def _morning_move_pct(stock_client: StockHistoricalDataClient, symbol: str, ref_
     hi = bars["high"].max()
     lo = bars["low"].min()
     return (hi - lo) / open_price
-def _iv_rank(stock_client: StockHistoricalDataClient, symbol: str, lookback_days: int = 30) -> float:
+
+
+def _iv_rank(
+    stock_client: StockHistoricalDataClient, symbol: str, lookback_days: int = 30
+) -> float:
     """Return a placeholder IV rank between 0 and 1.
     TODO: Implement proper IV rank using option IV history.
     """
@@ -497,16 +590,23 @@ def _iv_rank(stock_client: StockHistoricalDataClient, symbol: str, lookback_days
     return 0.3
 
 
-def _should_enter_trade(stock_client: StockHistoricalDataClient,
-                        option_hist: OptionHistoricalDataClient,
-                        symbol: str,
-                        cfg: Settings,
-                        is_anchor: bool) -> bool:
+def _should_enter_trade(
+    stock_client: StockHistoricalDataClient,
+    option_hist: OptionHistoricalDataClient,
+    symbol: str,
+    cfg: Settings,
+    is_anchor: bool,
+) -> bool:
     """Return True if context filters allow a new entry."""
     try:
         iv_rank = _iv_rank(stock_client, symbol)
         if iv_rank > cfg.IV_RANK_THRESHOLD:
-            logging.info("%s IV rank %.2f > threshold %.2f; skipping trade", symbol, iv_rank, cfg.IV_RANK_THRESHOLD)
+            logging.info(
+                "%s IV rank %.2f > threshold %.2f; skipping trade",
+                symbol,
+                iv_rank,
+                cfg.IV_RANK_THRESHOLD,
+            )
             return False
     except Exception as e:
         logging.warning("IV rank check failed for %s: %s", symbol, e)
@@ -515,7 +615,12 @@ def _should_enter_trade(stock_client: StockHistoricalDataClient,
         try:
             move_pct = _morning_move_pct(stock_client, symbol)
             if move_pct > cfg.ANCHOR_MOVE_PCT_MAX:
-                logging.info("%s morning move %.3f > %.3f; skipping anchor trade", symbol, move_pct, cfg.ANCHOR_MOVE_PCT_MAX)
+                logging.info(
+                    "%s morning move %.3f > %.3f; skipping anchor trade",
+                    symbol,
+                    move_pct,
+                    cfg.ANCHOR_MOVE_PCT_MAX,
+                )
                 return False
         except Exception as e:
             logging.warning("Morning move check failed for %s: %s", symbol, e)
@@ -531,7 +636,7 @@ def _should_enter_trade(stock_client: StockHistoricalDataClient,
     """Fetch spot price with retries."""
     resp = safe_api_call(
         stock_client.get_stock_latest_trade,
-        StockLatestTradeRequest(symbol_or_symbols=[symbol])
+        StockLatestTradeRequest(symbol_or_symbols=[symbol]),
     )
     trade = resp[symbol]
     return float(trade.price)
@@ -543,12 +648,13 @@ def choose_atm_contract(
     symbol: str,
 ) -> str:
     today = date.today().isoformat()
-    chain = TradingClient.get_option_contracts(trading,
+    chain = TradingClient.get_option_contracts(
+        trading,
         GetOptionContractsRequest(
             underlying_symbols=[symbol],
             expiration_date=today,
             limit=500,
-        )
+        ),
     )
     spot = get_underlying_price(stock_client, symbol)
     calls = [c for c in chain if c.contract_type == "call"]
@@ -563,9 +669,7 @@ def choose_atm_contract(
     return atm.symbol
 
 
-def submit_buy(
-    trading: TradingClient, option_symbol: str, qty: int
-) -> Dict:
+def submit_buy(trading: TradingClient, option_symbol: str, qty: int) -> Dict:
     leg = OptionLegRequest(
         symbol=option_symbol,
         qty=qty,
@@ -582,8 +686,6 @@ def submit_buy(
     resp = TradingClient.submit_order(trading, order)
     logging.info("Submitted BUY order %s; status=%s", resp.id, resp.status)
     return resp
-
-
 
 
 def choose_otm_strangle_contracts(
@@ -625,13 +727,21 @@ def choose_otm_strangle_contracts(
 
     # default symmetric deltas
     near_delta = 0.15
-    far_delta  = 0.25
+    far_delta = 0.25
     if cfg:
         near_delta = cfg.SKEW_DELTA_NEAR or near_delta
-        far_delta  = cfg.SKEW_DELTA_FAR or far_delta
+        far_delta = cfg.SKEW_DELTA_FAR or far_delta
     # if bias detected, skew deltas
-    call_target = near_delta if bias == "bearish" else far_delta if bias == "bullish" else near_delta
-    put_target  = near_delta if bias == "bullish" else far_delta if bias == "bearish" else near_delta
+    call_target = (
+        near_delta
+        if bias == "bearish"
+        else far_delta if bias == "bullish" else near_delta
+    )
+    put_target = (
+        near_delta
+        if bias == "bullish"
+        else far_delta if bias == "bearish" else near_delta
+    )
 
     # Fetch greeks for all candidate symbols (bulk snapshot)
     symbols = [c.symbol for c in calls] + [p.symbol for p in puts]
@@ -646,7 +756,7 @@ def choose_otm_strangle_contracts(
         logging.warning("Delta lookup failed: %s – fallback to nearest-OTM", e)
         # Simply choose nearest strikes
         best_call = min(calls, key=lambda c: _strike(c) - spot)
-        best_put  = min(puts,  key=lambda p: spot - _strike(p))
+        best_put = min(puts, key=lambda p: spot - _strike(p))
         return best_call.symbol, best_put.symbol
 
     # Helper to pick symbol whose |delta| closest to target
@@ -655,7 +765,7 @@ def choose_otm_strangle_contracts(
         return best.symbol
 
     call_sym = _pick(calls, call_target)
-    put_sym  = _pick(puts,  put_target)
+    put_sym = _pick(puts, put_target)
     return call_sym, put_sym
 
 
@@ -686,19 +796,25 @@ def choose_iron_condor_contracts(
 
     # normalize contract type and strike attributes
     def ct(c):
-        if hasattr(c, 'contract_type'):
+        if hasattr(c, "contract_type"):
             return c.contract_type
-        t = getattr(c, 'type', None)
-        return t.value if hasattr(t, 'value') else t
+        t = getattr(c, "type", None)
+        return t.value if hasattr(t, "value") else t
 
     def st(c):
-        if hasattr(c, 'strike'):
+        if hasattr(c, "strike"):
             return c.strike
-        return getattr(c, 'strike_price', 0)
+        return getattr(c, "strike_price", 0)
 
     # separate OTM calls and puts
-    calls = sorted([c for c in chain if ct(c) == 'call' and st(c) > spot], key=lambda c: st(c))
-    puts = sorted([p for p in chain if ct(p) == 'put' and st(p) < spot], key=lambda p: st(p), reverse=True)
+    calls = sorted(
+        [c for c in chain if ct(c) == "call" and st(c) > spot], key=lambda c: st(c)
+    )
+    puts = sorted(
+        [p for p in chain if ct(p) == "put" and st(p) < spot],
+        key=lambda p: st(p),
+        reverse=True,
+    )
     # ensure enough strikes for wings
     if len(calls) <= wing_spread or len(puts) <= wing_spread:
         raise RuntimeError(f"Insufficient strikes to build iron condor for {symbol}")
@@ -744,14 +860,18 @@ def submit_iron_condor(
     resp = TradingClient.submit_order(trading, order)
     logging.info(
         "Submitted IRON CONDOR entry order %s; status=%s",
-        getattr(resp, 'id', None),
-        getattr(resp, 'status', None),
+        getattr(resp, "id", None),
+        getattr(resp, "status", None),
     )
     return resp
 
     logging.info(
         "OTM Strangle for %s: call %s (@%.2f) & put %s (@%.2f)",
-        symbol, call.symbol, st(call), put.symbol, st(put)
+        symbol,
+        call.symbol,
+        st(call),
+        put.symbol,
+        st(put),
     )
     return call.symbol, put.symbol
     return call.symbol, put.symbol
@@ -784,7 +904,6 @@ def submit_strangle(
     return resp
 
 
-
 def monitor_and_exit(
     trading: TradingClient,
     option_client: OptionHistoricalDataClient,
@@ -810,8 +929,8 @@ def monitor_and_exit(
             logging.warning("Cutoff time reached (%s). Exiting...", exit_cutoff)
             break
 
-        trade = OptionHistoricalDataClient.get_option_latest_trade(option_client, 
-            OptionLatestTradeRequest(symbol_or_symbols=[entry_symbol])
+        trade = OptionHistoricalDataClient.get_option_latest_trade(
+            option_client, OptionLatestTradeRequest(symbol_or_symbols=[entry_symbol])
         )[entry_symbol]
         current = float(trade.price)
         logging.debug("%s @ %.4f", entry_symbol, current)
@@ -839,7 +958,6 @@ def monitor_and_exit(
     return resp
 
 
-
 def monitor_and_exit_strangle(
     trading: TradingClient,
     option_client: OptionHistoricalDataClient,
@@ -857,9 +975,14 @@ def monitor_and_exit_strangle(
         cfg = Settings()
         cfg = Settings()
     except Exception as e:
-        logging.warning("Failed to load Settings in monitor_and_exit_strangle; using default STOP_LOSS_PCT=0.0 (%s)", e)
+        logging.warning(
+            "Failed to load Settings in monitor_and_exit_strangle; using default STOP_LOSS_PCT=0.0 (%s)",
+            e,
+        )
+
         class _CfgDefault:
             STOP_LOSS_PCT = 0.0
+
         cfg = _CfgDefault()
     target_sum = entry_price_sum * (1 + target_pct)
     stop_loss_sum = entry_price_sum * (1 - cfg.STOP_LOSS_PCT)
@@ -867,82 +990,80 @@ def monitor_and_exit_strangle(
     strangle_pnl_history = []
     logging.info(
         "Monitoring strangle %s: entry_sum=%.4f, target_sum=%.4f, stop_loss_sum=%.4f, cutoff=%s",
-        symbols, entry_price_sum, target_sum, stop_loss_sum, exit_cutoff.isoformat(),
+        symbols,
+        entry_price_sum,
+        target_sum,
+        stop_loss_sum,
+        exit_cutoff.isoformat(),
     )
 
     while True:
         now = datetime.now()
         if now.time() >= exit_cutoff:
-            logging.warning("Strangle cutoff time reached (%s). Exiting monitor.", exit_cutoff)
+            logging.warning(
+                "Strangle cutoff time reached (%s). Exiting monitor.", exit_cutoff
+            )
             break
         try:
             trades = OptionHistoricalDataClient.get_option_latest_trade(
-                option_client,
-                OptionLatestTradeRequest(symbol_or_symbols=symbols)
+                option_client, OptionLatestTradeRequest(symbol_or_symbols=symbols)
             )
             prices = [float(trades[sym].price) for sym in symbols]
         except requests.exceptions.RequestException as err:
             logging.warning(
                 "Error fetching strangle prices %s: %s – retrying in %.1fs",
-                symbols, err, poll_interval,
+                symbols,
+                err,
+                poll_interval,
             )
             time.sleep(poll_interval)
             continue
-                # Tighter logging: record equity & PnL snapshot
+            # Tighter logging: record equity & PnL snapshot
         ts = datetime.now()
         try:
             account = TradingClient.get_account(trading)
             equity = float(account.equity)
         except Exception as e:
-            logging.warning(
-                "Unable to fetch equity during strangle monitor: %s", e
-            )
+            logging.warning("Unable to fetch equity during strangle monitor: %s", e)
             equity = None
         current_sum = sum(prices)
         trade_pnl = (current_sum - entry_price_sum) * qty
         if equity is not None:
-            logging.debug(
-                "Current equity=%.2f, trade PnL=%.2f", equity, trade_pnl
-            )
+            logging.debug("Current equity=%.2f, trade PnL=%.2f", equity, trade_pnl)
         else:
-            logging.debug(
-                "Trade PnL=%.2f", trade_pnl
-            )
+            logging.debug("Trade PnL=%.2f", trade_pnl)
         strangle_pnl_history.append((ts, trade_pnl))
         try:
             account = TradingClient.get_account(trading)
             equity = float(account.equity)
             pnl = equity - daily_start_equity
-            logging.debug(
-                "Current equity=%.2f, PnL=%.2f", equity, pnl
-            )
+            logging.debug("Current equity=%.2f, PnL=%.2f", equity, pnl)
         except Exception as e:
-            logging.warning(
-                "Unable to fetch equity during strangle monitor: %s", e
-            )
+            logging.warning("Unable to fetch equity during strangle monitor: %s", e)
         current_sum = sum(prices)
-        logging.debug(
-            "Current strangle sum %s → %.4f", symbols, current_sum
-        )
+        logging.debug("Current strangle sum %s → %.4f", symbols, current_sum)
         # Delta-based stop-loss
         try:
             snaps = OptionHistoricalDataClient.get_option_snapshot(
-                option_client,
-                OptionSnapshotRequest(symbol_or_symbols=symbols)
+                option_client, OptionSnapshotRequest(symbol_or_symbols=symbols)
             )
-            max_delta = max(abs(snap.greeks.delta) for snap in snaps.values() if snap.greeks and snap.greeks.delta is not None)
+            max_delta = max(
+                abs(snap.greeks.delta)
+                for snap in snaps.values()
+                if snap.greeks and snap.greeks.delta is not None
+            )
             if max_delta >= cfg.SHORT_DELTA_STOP:
                 logging.info(
-                    "Delta stop triggered: |delta| %.2f >= %.2f", max_delta, cfg.SHORT_DELTA_STOP
+                    "Delta stop triggered: |delta| %.2f >= %.2f",
+                    max_delta,
+                    cfg.SHORT_DELTA_STOP,
                 )
                 break
         except Exception as e:
             logging.debug("Delta check error: %s", e)
 
         if current_sum >= target_sum:
-            logging.info(
-                "Strangle target hit: %.4f >= %.4f", current_sum, target_sum
-            )
+            logging.info("Strangle target hit: %.4f >= %.4f", current_sum, target_sum)
             break
         if current_sum <= stop_loss_sum:
             logging.info(
@@ -957,20 +1078,21 @@ def monitor_and_exit_strangle(
         for sym in symbols
     ]
     resp = submit_complex_order(trading, legs, qty)
-    
+
     # Compute and return trade PnL
     try:
         # Use last observed option prices to compute exit sum
-                # Fetch latest exit trade prices for each leg
+        # Fetch latest exit trade prices for each leg
         exit_trades = OptionHistoricalDataClient.get_option_latest_trade(
-            option_client,
-            OptionLatestTradeRequest(symbol_or_symbols=symbols)
+            option_client, OptionLatestTradeRequest(symbol_or_symbols=symbols)
         )
         exit_prices = [float(exit_trades[s].price) for s in symbols]
         exit_price_sum = sum(exit_prices)
         # PnL per contract per share: exit - entry; convert to USD: *qty contracts *100 shares
         # PnL per contract per share: exit - entry; convert to USD: *qty contracts *100 shares
-        pnl = (exit_price_sum - entry_price_sum) * qty * 100  # profit from net credit (sell - buy)
+        pnl = (
+            (exit_price_sum - entry_price_sum) * qty * 100
+        )  # profit from net credit (sell - buy)
         logging.info("Exit PnL=%.2f", pnl)
     except Exception as e:
         logging.warning(
@@ -989,7 +1111,6 @@ def monitor_and_exit_strangle(
     return pnl
 
 
-
 def run_strangle(
     trading: TradingClient,
     stock_client: StockHistoricalDataClient,
@@ -1006,16 +1127,23 @@ def run_strangle(
     Helper to place and monitor a single OTM strangle.
     """
     try:
-        call_sym, put_sym = choose_otm_strangle_contracts(trading, stock_client, symbol, option_client, bias=bias, cfg=cfg)
+        call_sym, put_sym = choose_otm_strangle_contracts(
+            trading, stock_client, symbol, option_client, bias=bias, cfg=cfg
+        )
         try:
             cfg = Settings()  # load settings for pre-trade filters
         except Exception as e:
-            logging.warning("Failed to load Settings in run_strangle; using fallback defaults: %s", e)
+            logging.warning(
+                "Failed to load Settings in run_strangle; using fallback defaults: %s",
+                e,
+            )
+
             class _CfgDefault:
                 MAX_SPREAD_PCT = 0.02
                 MIN_IV = 0.10
                 STOP_LOSS_PCT = 0.20
                 RISK_PCT_PER_TRADE = 0.01
+
             cfg = _CfgDefault()
 
         # Dynamic position sizing based on risk per trade
@@ -1023,12 +1151,12 @@ def run_strangle(
         try:
             latest_quotes = OptionHistoricalDataClient.get_option_latest_quote(
                 option_client,
-                OptionLatestQuoteRequest(symbol_or_symbols=[call_sym, put_sym])
+                OptionLatestQuoteRequest(symbol_or_symbols=[call_sym, put_sym]),
             )
             for s, q in latest_quotes.items():
                 spread = q.ask_price - q.bid_price
                 midpoint = (q.ask_price + q.bid_price) / 2
-                spread_pct = spread / midpoint if midpoint > 0 else float('inf')
+                spread_pct = spread / midpoint if midpoint > 0 else float("inf")
                 if spread_pct > cfg.MAX_SPREAD_PCT:
                     global _spread_skipped_count
                     _spread_skipped_count += 1
@@ -1052,7 +1180,7 @@ def run_strangle(
         try:
             snapshots = OptionHistoricalDataClient.get_option_snapshot(
                 option_client,
-                OptionSnapshotRequest(symbol_or_symbols=[call_sym, put_sym])
+                OptionSnapshotRequest(symbol_or_symbols=[call_sym, put_sym]),
             )
             for s, snap in snapshots.items():
                 iv = snap.implied_volatility
@@ -1065,16 +1193,12 @@ def run_strangle(
                         s,
                         cfg.MIN_IV * 100,
                     )
-                    logging.info(
-                        "Total IV-skipped count: %d", _iv_skipped_count
-                    )
+                    logging.info("Total IV-skipped count: %d", _iv_skipped_count)
                     return
         except Exception as e:
             logging.warning(
                 "Error fetching snapshots for IV filter: %s; proceeding anyway.", e
             )
-
-
 
         try:
             # fetch current equity
@@ -1083,18 +1207,20 @@ def run_strangle(
             # estimate option credit for sizing (credit from selling both legs)
             trades = OptionHistoricalDataClient.get_option_latest_trade(
                 option_client,
-                OptionLatestTradeRequest(symbol_or_symbols=[call_sym, put_sym])
+                OptionLatestTradeRequest(symbol_or_symbols=[call_sym, put_sym]),
             )
             pr_call = float(trades[call_sym].price)
             pr_put = float(trades[put_sym].price)
             entry_credit_est = pr_call + pr_put
-                
+
             # Conservative sizing for unit tests – cap stop-loss at 20% and ensure at least 1% equity risk budget
             effective_sl = min(cfg.STOP_LOSS_PCT, 0.20)
             effective_risk_pct = max(cfg.RISK_PCT_PER_TRADE, 0.01)
             risk_per_contract = entry_credit_est * effective_sl
             allowed_risk = equity * effective_risk_pct
-            max_contracts = int(allowed_risk / risk_per_contract) if risk_per_contract > 0 else 0
+            max_contracts = (
+                int(allowed_risk / risk_per_contract) if risk_per_contract > 0 else 0
+            )
             original_qty = qty
             qty = min(original_qty, max_contracts) if max_contracts > 0 else 0
             if qty < 1:
@@ -1154,11 +1280,16 @@ def run_strangle(
                     logging.info("Leg %s filled at %.4f", leg_id, float(avg_price))
                     break
                 if time.time() - start_time > fill_timeout:
-                    logging.error("Timeout waiting for fill on leg %s. Aborting this strangle.", leg_id)
+                    logging.error(
+                        "Timeout waiting for fill on leg %s. Aborting this strangle.",
+                        leg_id,
+                    )
                     return
                 time.sleep(1)
         entry_price_sum = sum(filled_prices)
-        logging.info("Entry prices %s → entry_price_sum=%.4f", filled_prices, entry_price_sum)
+        logging.info(
+            "Entry prices %s → entry_price_sum=%.4f", filled_prices, entry_price_sum
+        )
         pnl = monitor_and_exit_strangle(
             trading,
             option_client,
@@ -1175,7 +1306,6 @@ def run_strangle(
         logging.error("Error in run_strangle: %s", e, exc_info=True)
 
 
-
 def schedule_for_symbol(
     symbol: str,
     cfg: Settings,
@@ -1189,20 +1319,33 @@ def schedule_for_symbol(
     # ------------------------------------------------------------------
     # Day-type classification (Phase-1)
     # ------------------------------------------------------------------
-    from apps.zero_dte.market_structure import classify_day, StrategySelector
     from apps.zero_dte.config import load_daytype_config
+    from apps.zero_dte.market_structure import (StrategyID, StrategySelector,
+                                                classify_day)
 
     cfg_yaml = load_daytype_config()
     day_type = classify_day(symbol, stock_hist, cfg=cfg_yaml)
     strategy_id = StrategySelector.from_config(cfg_yaml).strategy_for_day(day_type)
-    logging.info("DayType for %s → %s; mapped strategy %s", symbol, day_type, strategy_id)
+    logging.info(
+        "DayType for %s → %s; mapped strategy %s", symbol, day_type, strategy_id
+    )
+    # Route unsupported strategies to placeholder (Phase-1 stub)
+    if strategy_id != StrategyID.SYMMETRIC_STRANGLE and strategy != "two_phase":
+        logging.info(
+            "Strategy %s not implemented yet; skipping trading for %s",
+            strategy_id,
+            symbol,
+        )
+        return
 
     # Existing gap-and-go detection retained for backwards compatibility
     bias = detect_gap_and_go(stock_hist, symbol, cfg)
     if bias:
         logging.info("Gap-and-go detected for %s (%s)", symbol, bias)
         if cfg.SKIP_ON_GAP_AND_GO:
-            logging.info("SKIP_ON_GAP_AND_GO=True; skipping all trades for %s today", symbol)
+            logging.info(
+                "SKIP_ON_GAP_AND_GO=True; skipping all trades for %s today", symbol
+            )
             return
     else:
         logging.info("No gap-and-go for %s", symbol)
@@ -1217,10 +1360,7 @@ def schedule_for_symbol(
     trade_end_dt = datetime.combine(today, anchor_end_time)
     duration = trade_end_dt - trade_start_dt
     # Generate anchor times with ±5 min jitter (clamped to trading window)
-    raw_anchors = [
-        trade_start_dt + duration * frac
-        for frac in (0, 0.25, 0.5, 0.75, 1)
-    ]
+    raw_anchors = [trade_start_dt + duration * frac for frac in (0, 0.25, 0.5, 0.75, 1)]
     anchors = []
     for base in raw_anchors:
         jitter_offset = timedelta(seconds=random.uniform(-300, 300))
@@ -1262,20 +1402,28 @@ def schedule_for_symbol(
             cfg,
         )
 
-    # Determine thread target
+    # Determine thread target via builder router
     if strategy == "two_phase":
         if run_two_phase is None:
             from apps.zero_dte.two_phase import run_two_phase as _rp
+
             globals()["run_two_phase"] = _rp
         thread_target = run_two_phase
     else:
-        thread_target = run_strangle
+        from apps.zero_dte.builders import select_builder
+
+        builder_cls = select_builder(strategy_id)
+        thread_target = lambda *args: builder_cls(*args).build()
 
     anchor_args = _build_args(cfg.QTY)
-    event_args  = _build_args(max(1, cfg.QTY // 2))
+    event_args = _build_args(max(1, cfg.QTY // 2))
 
-    event_trade_since_anchor = False    # Continuous polling for anchors and event-triggered trades
-    next_anchor_idx = next((idx for idx, t in enumerate(anchors) if t >= datetime.now()), len(anchors) - 1)
+    event_trade_since_anchor = (
+        False  # Continuous polling for anchors and event-triggered trades
+    )
+    next_anchor_idx = next(
+        (idx for idx, t in enumerate(anchors) if t >= datetime.now()), len(anchors) - 1
+    )
     while not type_shutdown.is_set() and trades_done < cfg.MAX_TRADES:
         now = datetime.now()
         # Poll live equity to enforce drawdown/profit limits
@@ -1283,8 +1431,16 @@ def schedule_for_symbol(
             account = trading.get_account()
             current_equity = float(account.equity)
             # Calculate drawdown and profit percentages
-            drawdown_pct = max(0, (daily_start_equity - current_equity) / daily_start_equity) if daily_start_equity > 0 else 0
-            profit_pct = (current_equity - daily_start_equity) / daily_start_equity if daily_start_equity > 0 else 0
+            drawdown_pct = (
+                max(0, (daily_start_equity - current_equity) / daily_start_equity)
+                if daily_start_equity > 0
+                else 0
+            )
+            profit_pct = (
+                (current_equity - daily_start_equity) / daily_start_equity
+                if daily_start_equity > 0
+                else 0
+            )
             logging.info(
                 "Equity: %.2f, drawdown %.2f%%, profit %.2f%%",
                 current_equity,
@@ -1323,7 +1479,9 @@ def schedule_for_symbol(
                 trades_done + 1,
                 anchor.time(),
             )
-            if _should_enter_trade(stock_hist, option_hist, symbol, cfg, is_anchor=True):
+            if _should_enter_trade(
+                stock_hist, option_hist, symbol, cfg, is_anchor=True
+            ):
                 t = threading.Thread(
                     target=_execute_trade_and_update,
                     args=(thread_target, anchor_args, cfg),
@@ -1360,7 +1518,6 @@ def schedule_for_symbol(
                 last_spot = curr_spot
         time.sleep(cfg.POLL_INTERVAL)
 
-
     # Wait for all threads to complete
     for t in threads:
         t.join()
@@ -1371,7 +1528,6 @@ def schedule_for_symbol(
     )
 
 
-
 def main(strategy: str = "two_phase", auto_reenter: bool = False):
     setup_logging()
     logging.info(
@@ -1380,9 +1536,7 @@ def main(strategy: str = "two_phase", auto_reenter: bool = False):
         cfg.PAPER,
     )
 
-    trading = TradingClient(
-        cfg.ALPACA_API_KEY, cfg.ALPACA_API_SECRET, paper=cfg.PAPER
-    )
+    trading = TradingClient(cfg.ALPACA_API_KEY, cfg.ALPACA_API_SECRET, paper=cfg.PAPER)
     # Initialize daily P&L and starting equity (percent drawdown circuit breaker)
     global daily_pnl, daily_start_equity
     daily_pnl = 0.0
@@ -1400,7 +1554,7 @@ def main(strategy: str = "two_phase", auto_reenter: bool = False):
     option_hist = OptionHistoricalDataClient(
         api_key=cfg.ALPACA_API_KEY,
         secret_key=cfg.ALPACA_API_SECRET,
-        sandbox=False  # use live data endpoint,
+        sandbox=False,  # use live data endpoint,
     )
     # Wait until market is open before submitting orders
     clock = trading.get_clock()
@@ -1428,6 +1582,7 @@ def main(strategy: str = "two_phase", auto_reenter: bool = False):
         t.join()
     logging.info("All symbols processed: %s", cfg.UNDERLYING)
 
+
 def analyze_logs_for_date(trading_date: date):
     """
     Read the log file(s) for the given trading date, summarize key metrics, and log recommendations.
@@ -1436,7 +1591,7 @@ def analyze_logs_for_date(trading_date: date):
     # Locate logs directory in project root
     file_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(file_dir, os.pardir, os.pardir))
-    log_dir = os.path.join(project_root, 'logs')
+    log_dir = os.path.join(project_root, "logs")
     lines: list[str] = []
     # Read primary date-based log
     primary_log = os.path.join(log_dir, f"{trading_date.isoformat()}.log")
@@ -1445,7 +1600,7 @@ def analyze_logs_for_date(trading_date: date):
     except FileNotFoundError:
         logging.warning("Date-based log file not found for analysis: %s", primary_log)
     # Read strangle-specific log and include only entries for this date
-    strangle_log = os.path.join(log_dir, 'zero_dte_strangle.log')
+    strangle_log = os.path.join(log_dir, "zero_dte_strangle.log")
     try:
         slines = open(strangle_log).read().splitlines()
         date_prefix = trading_date.isoformat()
@@ -1466,33 +1621,42 @@ def analyze_logs_for_date(trading_date: date):
     avg_pnl = total_pnl / total_trades if total_trades else 0.0
     logging.info(
         "End-of-day analysis for %s: trades=%d, total_PnL=%.2f, avg_PnL=%.2f",
-        trading_date.isoformat(), total_trades, total_pnl, avg_pnl
+        trading_date.isoformat(),
+        total_trades,
+        total_pnl,
+        avg_pnl,
     )
     if errors:
         logging.warning("Errors encountered during trading day (%d):", len(errors))
         for e in errors:
             logging.warning("%s", e)
-        logging.info("Recommendation: Investigate errors and add resilience (retries, exception handling).")
+        logging.info(
+            "Recommendation: Investigate errors and add resilience (retries, exception handling)."
+        )
     if avg_pnl < 0:
         logging.info(
             "Recommendation: Strategy resulted in negative average PnL (%.2f). Consider adjusting targets or filters.",
-            avg_pnl
+            avg_pnl,
         )
     else:
-        logging.info("Recommendation: Strategy yielded positive average PnL. Continue monitoring and fine-tuning thresholds.")
-
-
-
-
-
+        logging.info(
+            "Recommendation: Strategy yielded positive average PnL. Continue monitoring and fine-tuning thresholds."
+        )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--strategy", choices=["strangle", "two_phase"], default="two_phase",
-                        help="Trading strategy to run: single-phase strangle or two-phase flip")
-    parser.add_argument("--auto-reenter", action="store_true",
-                        help="Enable automatic re-entry of a new trading cycle on drawdown shutdown.")
+    parser.add_argument(
+        "--strategy",
+        choices=["strangle", "two_phase"],
+        default="two_phase",
+        help="Trading strategy to run: single-phase strangle or two-phase flip",
+    )
+    parser.add_argument(
+        "--auto-reenter",
+        action="store_true",
+        help="Enable automatic re-entry of a new trading cycle on drawdown shutdown.",
+    )
     args = parser.parse_args()
     strategy = args.strategy
     auto_reenter = args.auto_reenter
@@ -1511,7 +1675,9 @@ if __name__ == "__main__":
             main(strategy)
             if not auto_reenter or not type_shutdown.is_set():
                 break
-            logging.info("Auto-reenter enabled: restarting trading cycle with fresh PnL and equity.")
+            logging.info(
+                "Auto-reenter enabled: restarting trading cycle with fresh PnL and equity."
+            )
             type_shutdown.clear()
         # End-of-day analysis
         analyze_logs_for_date(date.today())
@@ -1519,6 +1685,9 @@ if __name__ == "__main__":
         tomorrow = date.today() + timedelta(days=1)
         next_start = datetime.combine(tomorrow, cfg.TRADE_START)
         secs = (next_start - datetime.now()).total_seconds()
-        logging.info("Sleeping until next trading day start at %s (%.0f seconds)", next_start, secs)
+        logging.info(
+            "Sleeping until next trading day start at %s (%.0f seconds)",
+            next_start,
+            secs,
+        )
         time.sleep(secs)
-

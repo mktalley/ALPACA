@@ -1,4 +1,5 @@
 """Unit tests for _load_greeks_df and _pick_strikes_by_delta."""
+
 from datetime import date
 
 import pandas as pd
@@ -32,7 +33,9 @@ def test_pick_strikes_fallback(tmp_path, monkeypatch):
 
     # stub get_stock_bars to return dummy df with open price
     def _dummy_stock_bars(sym, d):
-        return pd.DataFrame({"open": [spot_price]}, index=[pd.Timestamp("2025-06-20T14:30Z")])
+        return pd.DataFrame(
+            {"open": [spot_price]}, index=[pd.Timestamp("2025-06-20T14:30Z")]
+        )
 
     monkeypatch.setattr(sim._data, "_CACHE_ROOT", tmp_path / "cache")
     monkeypatch.setattr(sim._data, "get_stock_bars", _dummy_stock_bars)
@@ -41,6 +44,7 @@ def test_pick_strikes_fallback(tmp_path, monkeypatch):
     assert call_sym.startswith(ul)
     assert put_sym.startswith(ul)
     import math
+
     expected_call = "C" + str((math.ceil(spot_price) + 1) * 100).zfill(8)
     expected_put = "P" + str((math.floor(spot_price) - 1) * 100).zfill(8)
     assert call_sym.endswith(expected_call)

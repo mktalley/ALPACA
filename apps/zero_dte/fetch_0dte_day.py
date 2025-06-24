@@ -15,6 +15,7 @@ Notes
 * Uses OptionHistoricalDataClient v2 endpoints via SDK.
 * Snapshot endpoint returns *all* contracts; we filter with OCC YYMMDD segment.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,6 +25,7 @@ from pathlib import Path
 from typing import List
 
 import pandas as pd
+
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.data.requests import OptionBarsRequest, OptionChainRequest
 from alpaca.data.timeframe import TimeFrame
@@ -32,14 +34,19 @@ from alpaca.data.timeframe import TimeFrame
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _contracts_for_day(client: OptionHistoricalDataClient, underlying: str, exp: date) -> List[str]:
+
+def _contracts_for_day(
+    client: OptionHistoricalDataClient, underlying: str, exp: date
+) -> List[str]:
     """Return list of OCC option-contract symbols for *underlying* that expire on *exp*."""
     # Use Trading API contracts endpoint because it includes inactive/expired contracts.
     from alpaca.trading.client import TradingClient
-    from alpaca.trading.requests import GetOptionContractsRequest
     from alpaca.trading.enums import AssetStatus
+    from alpaca.trading.requests import GetOptionContractsRequest
 
-    trading = TradingClient(os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_API_SECRET"), paper=True)
+    trading = TradingClient(
+        os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_API_SECRET"), paper=True
+    )
     req = GetOptionContractsRequest(
         underlying_symbols=[underlying],
         expiration_date=exp,
@@ -50,10 +57,15 @@ def _contracts_for_day(client: OptionHistoricalDataClient, underlying: str, exp:
 
     # The SDK returns either a typed response object (attr ``option_contracts``)
     # or raw dict when `use_raw_data=True`. Handle both.
-    contracts = resp.option_contracts if hasattr(resp, "option_contracts") else resp.get("option_contracts", [])
+    contracts = (
+        resp.option_contracts
+        if hasattr(resp, "option_contracts")
+        else resp.get("option_contracts", [])
+    )
 
     # Filter to valid OCC symbols (e.g. SPY240621C00410000)
     import re
+
     base = underlying.upper()
     pat = re.compile(rf"^{base}(\d{{6}}|\d{{7}})[CP]\d{{8}}$")
     return [
@@ -93,10 +105,17 @@ def _fetch_bars_for_symbols(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main():
-    ap = argparse.ArgumentParser(description="Fetch 0-DTE option minute bars for one day")
+    ap = argparse.ArgumentParser(
+        description="Fetch 0-DTE option minute bars for one day"
+    )
     ap.add_argument("--underlying", default="SPY")
-    ap.add_argument("--date", required=True, help="YYYY-MM-DD expiration / trade date (must be a Friday)")
+    ap.add_argument(
+        "--date",
+        required=True,
+        help="YYYY-MM-DD expiration / trade date (must be a Friday)",
+    )
     ap.add_argument("--out", required=True, help="Output parquet file path")
     args = ap.parse_args()
 
@@ -136,6 +155,7 @@ def main():
     # 2. Fetch option snapshots to capture Greeks (delta) once during day
     # ------------------------------------------------------------------
     from alpaca.data.requests import OptionSnapshotRequest
+
     SNAP_CHUNK = 400  # snapshot limit lower
     snaps = []
     for i in range(0, len(symbols), SNAP_CHUNK):
@@ -150,13 +170,15 @@ def main():
             greeks = getattr(snap, "greeks", None)
             if not greeks:
                 continue
-            snaps.append({
-                "symbol": sym,
-                "delta": greeks.delta,
-                "theta": greeks.theta,
-                "gamma": greeks.gamma,
-                "vega": greeks.vega,
-            })
+            snaps.append(
+                {
+                    "symbol": sym,
+                    "delta": greeks.delta,
+                    "theta": greeks.theta,
+                    "gamma": greeks.gamma,
+                    "vega": greeks.vega,
+                }
+            )
     df_g = pd.DataFrame(snaps)
 
     # ------------------------------------------------------------------
@@ -168,9 +190,21 @@ def main():
     df.to_csv(csv_path, index=False)
 
     if not df_g.empty:
+        # Save alongside bar file for archival
         g_path = out_path.with_name(out_path.stem + "_greeks.parquet")
         df_g.to_parquet(g_path)
         print(f"Greeks saved to {g_path}")
+        # Also drop a copy into cache for simulator fast access
+        from apps.zero_dte import data as _data
+
+        g_cache = (
+            _data._CACHE_ROOT
+            / "greeks"
+            / args.underlying.upper()
+            / f"{exp:%Y%m%d}.parquet"
+        )
+        g_cache.parent.mkdir(parents=True, exist_ok=True)
+        df_g.to_parquet(g_cache)
 
     print(f"Saved {len(df):,} bar rows to {out_path} and {csv_path}")
 

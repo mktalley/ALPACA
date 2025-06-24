@@ -6,14 +6,8 @@ from pydantic import ConfigDict
 
 from alpaca.common.enums import Sort, SupportedCurrencies
 from alpaca.common.requests import NonEmptyRequest
-from alpaca.data.enums import (
-    Adjustment,
-    CorporateActionsType,
-    DataFeed,
-    MarketType,
-    MostActivesBy,
-    OptionsFeed,
-)
+from alpaca.data.enums import (Adjustment, CorporateActionsType, DataFeed,
+                               MarketType, MostActivesBy, OptionsFeed)
 from alpaca.data.timeframe import TimeFrame
 from alpaca.trading.enums import ContractType
 

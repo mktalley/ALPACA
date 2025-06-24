@@ -10,22 +10,24 @@ Assumptions
 • All contracts are European cash-settled so we ignore assignment risk.
 • Commission = 0; multiplier = 100.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, date, time as dt_time, timedelta, timezone
+from datetime import date, datetime
+from datetime import time as dt_time
+from datetime import timedelta, timezone
 from typing import Dict, List, Tuple
+# Alpaca bar timestamps are UTC; convert to Eastern for convenience
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-
-from .data import get_option_bars, get_stock_bars
-from . import data as _data
-from .zero_dte_app import Settings
-
-# Alpaca bar timestamps are UTC; convert to Eastern for convenience
-from zoneinfo import ZoneInfo
 from alpaca.trading.client import TradingClient
+
+from . import data as _data
+from .data import get_option_bars, get_stock_bars
+from .zero_dte_app import Settings
 
 Eastern = ZoneInfo("America/New_York")  # All timestamps in local market time
 
@@ -38,9 +40,11 @@ def _ensure_sim_clients():
     global _trading_client, _stock_client
     if _stock_client is None:
         from .data import _ensure_clients as _data_clients
+
         _stock_client, _ = _data_clients()
     if _trading_client is None:
         import os
+
         _trading_client = TradingClient(
             api_key=os.getenv("ALPACA_API_KEY"),
             secret_key=os.getenv("ALPACA_API_SECRET"),
@@ -58,12 +62,12 @@ class TradeResult:
     pnl: float
 
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 import math
+
 
 def _bar_mid(bar_row):
     return (bar_row["open"] + bar_row["close"]) / 2.0
@@ -79,7 +83,9 @@ def _occ(ul: str, exp: _date, typ: str, strike: float) -> str:
 
 def _build_strangle_symbols(spot: float, exp: _date, ul: str):
     """Build nearest OTM short call & put (±1pt)."""
-    return _occ(ul, exp, "C", math.ceil(spot) + 1), _occ(ul, exp, "P", math.floor(spot) - 1)
+    return _occ(ul, exp, "C", math.ceil(spot) + 1), _occ(
+        ul, exp, "P", math.floor(spot) - 1
+    )
 
 
 def _build_condor_symbols(spot: float, exp: _date, ul: str, spread: int):
@@ -91,7 +97,6 @@ def _build_condor_symbols(spot: float, exp: _date, ul: str, spread: int):
         _occ(ul, exp, "C", sc_short + spread),
         _occ(ul, exp, "P", sp_short - spread),
     )
-
 
 
 def _load_greeks_df(ul: str, exp: date) -> pd.DataFrame:
@@ -124,6 +129,7 @@ def _pick_strikes_by_delta(ul: str, exp: date, near_delta: float) -> Tuple[str, 
 # Core back-test function
 # ---------------------------------------------------------------------------
 
+
 def run_backtest(
     symbol: str,
     start: date,
@@ -152,6 +158,7 @@ def run_backtest(
             cfg = Settings(**params) if not isinstance(params, Settings) else params
             # Morning volatility adjustment
             from .zero_dte_app import _morning_move_pct  # reuse helper
+
             try:
                 _, stock_client = _ensure_sim_clients()
                 move_pct = _morning_move_pct(stock_client, symbol, day)
@@ -166,9 +173,11 @@ def run_backtest(
                 dyn_qty = max(1, cfg.QTY // 2)
             # Build a Settings clone with adjusted QTY if needed
             if dyn_qty != cfg.QTY:
-                cfg = Settings(**{**cfg.model_dump(), 'QTY': dyn_qty})
+                cfg = Settings(**{**cfg.model_dump(), "QTY": dyn_qty})
             if strategy == "strangle":
-                res = _simulate_strangle_day(symbol, day, dyn_entry_time, exit_cutoff, cfg)
+                res = _simulate_strangle_day(
+                    symbol, day, dyn_entry_time, exit_cutoff, cfg
+                )
             else:
                 res = _simulate_condor_day(symbol, day, entry_time, exit_cutoff, cfg)
             if res:
@@ -179,22 +188,28 @@ def run_backtest(
     return results
 
 
-
 # ---------------------------------------------------------------------------
 # Strategy specific simulators
 # ---------------------------------------------------------------------------
 
-def _simulate_strangle_day(symbol: str, day: date, entry_t: dt_time, cutoff: dt_time, cfg: Settings):
+
+def _simulate_strangle_day(
+    symbol: str, day: date, entry_t: dt_time, cutoff: dt_time, cfg: Settings
+):
     # 1. pick call/put at entry_t-1min using underlying spot
     try:
         stock_bars = get_stock_bars(symbol, day)
     except Exception:
         return None
-    bar_entry_dt = datetime.combine(day, entry_t, tzinfo=Eastern).astimezone(timezone.utc)
+    bar_entry_dt = datetime.combine(day, entry_t, tzinfo=Eastern).astimezone(
+        timezone.utc
+    )
     # Ensure we have a bar at or after entry time
     if bar_entry_dt not in stock_bars.index:
         try:
-            bar_entry_dt = stock_bars.index[stock_bars.index.get_indexer([bar_entry_dt], method="backfill")[0]]
+            bar_entry_dt = stock_bars.index[
+                stock_bars.index.get_indexer([bar_entry_dt], method="backfill")[0]
+            ]
         except Exception:
             return None
     try:
@@ -213,7 +228,9 @@ def _simulate_strangle_day(symbol: str, day: date, entry_t: dt_time, cutoff: dt_
 
     # 3. fill entry at first bar ≥ entry_t
     entry_idx = call_bars.index.get_indexer([bar_entry_dt], method="backfill")[0]
-    entry_price = _bar_mid(call_bars.iloc[entry_idx]) + _bar_mid(put_bars.iloc[entry_idx])
+    entry_price = _bar_mid(call_bars.iloc[entry_idx]) + _bar_mid(
+        put_bars.iloc[entry_idx]
+    )
 
     # 4. walk forward minute by minute for exit
     stop_loss = entry_price * (1 - cfg.STOP_LOSS_PCT)
@@ -240,7 +257,9 @@ def _simulate_strangle_day(symbol: str, day: date, entry_t: dt_time, cutoff: dt_
     return TradeResult(-1, {}, bar_entry_dt, exit_dt, pnl_per_contract)
 
 
-def _simulate_condor_day(symbol: str, day: date, entry_t: dt_time, cutoff: dt_time, cfg: Settings):
+def _simulate_condor_day(
+    symbol: str, day: date, entry_t: dt_time, cutoff: dt_time, cfg: Settings
+):
     """Simulate a 4-leg 0-DTE iron condor.
 
     Short OTM call + short OTM put with equidistant long wings (defined-risk).
@@ -259,11 +278,12 @@ def _simulate_condor_day(symbol: str, day: date, entry_t: dt_time, cutoff: dt_ti
     if bar_entry_dt not in stock_bars.index:
         # If exact timestamp missing, pick previous bar (market may open earlier)
         try:
-            bar_entry_dt = stock_bars.index[stock_bars.index.get_indexer([bar_entry_dt], method="backfill")[0]]
+            bar_entry_dt = stock_bars.index[
+                stock_bars.index.get_indexer([bar_entry_dt], method="backfill")[0]
+            ]
         except Exception:
             return None
     underlying_price = stock_bars.loc[:bar_entry_dt].iloc[-1]["close"]
-
 
     sc_sym, sp_sym, lc_sym, lp_sym = _build_condor_symbols(
         underlying_price, day, symbol, cfg.CONDOR_WING_SPREAD
@@ -280,8 +300,10 @@ def _simulate_condor_day(symbol: str, day: date, entry_t: dt_time, cutoff: dt_ti
 
     # 3. Entry credit at first bar ≥ entry_t
     entry_idx = sc_bars.index.get_indexer([bar_entry_dt], method="backfill")[0]
+
     def mid(bars, idx):
         return _bar_mid(bars.iloc[idx])
+
     entry_credit = (
         mid(sc_bars, entry_idx)
         + mid(sp_bars, entry_idx)
@@ -303,18 +325,10 @@ def _simulate_condor_day(symbol: str, day: date, entry_t: dt_time, cutoff: dt_ti
         if bar_dt.time() >= cutoff:
             exit_dt = bar_dt
             exit_price = (
-                mid(sc_bars, i)
-                + mid(sp_bars, i)
-                - mid(lc_bars, i)
-                - mid(lp_bars, i)
+                mid(sc_bars, i) + mid(sp_bars, i) - mid(lc_bars, i) - mid(lp_bars, i)
             )
             break
-        price = (
-            mid(sc_bars, i)
-            + mid(sp_bars, i)
-            - mid(lc_bars, i)
-            - mid(lp_bars, i)
-        )
+        price = mid(sc_bars, i) + mid(sp_bars, i) - mid(lc_bars, i) - mid(lp_bars, i)
         if price >= stop_price or price <= target_price:
             exit_dt = bar_dt
             exit_price = price
