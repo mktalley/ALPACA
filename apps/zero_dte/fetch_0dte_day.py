@@ -132,13 +132,47 @@ def main():
         print("No bars fetched. Exiting.")
         return
 
+    # ------------------------------------------------------------------
+    # 2. Fetch option snapshots to capture Greeks (delta) once during day
+    # ------------------------------------------------------------------
+    from alpaca.data.requests import OptionSnapshotRequest
+    SNAP_CHUNK = 400  # snapshot limit lower
+    snaps = []
+    for i in range(0, len(symbols), SNAP_CHUNK):
+        chunk = symbols[i : i + SNAP_CHUNK]
+        req = OptionSnapshotRequest(symbol_or_symbols=chunk, feed="opra")
+        resp = client.get_option_snapshot(req)
+        # resp is Mapping[str, Snapshot]; transform to rows
+        for sym in chunk:
+            snap = resp.get(sym)
+            if not snap:
+                continue
+            greeks = getattr(snap, "greeks", None)
+            if not greeks:
+                continue
+            snaps.append({
+                "symbol": sym,
+                "delta": greeks.delta,
+                "theta": greeks.theta,
+                "gamma": greeks.gamma,
+                "vega": greeks.vega,
+            })
+    df_g = pd.DataFrame(snaps)
+
+    # ------------------------------------------------------------------
+    # 3. Save raw parquet/csv outputs
+    # ------------------------------------------------------------------
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    # Save monolithic file requested by user
     df.to_parquet(out_path)
     csv_path = out_path.with_suffix(".csv")
     df.to_csv(csv_path, index=False)
 
-    print(f"Saved {len(df):,} rows to {out_path} and {csv_path}")
+    if not df_g.empty:
+        g_path = out_path.with_name(out_path.stem + "_greeks.parquet")
+        df_g.to_parquet(g_path)
+        print(f"Greeks saved to {g_path}")
+
+    print(f"Saved {len(df):,} bar rows to {out_path} and {csv_path}")
 
     # ------------------------------------------------------------------
     # 3. Populate 0-DTE cache used by apps.zero_dte.data
