@@ -11,8 +11,16 @@ from websockets.legacy import client as websockets_legacy
 
 from alpaca import __version__
 from alpaca.common.types import RawData
-from alpaca.data.models import (Bar, News, Orderbook, Quote, Trade,
-                                TradeCancel, TradeCorrection, TradingStatus)
+from alpaca.data.models import (
+    Bar,
+    News,
+    Orderbook,
+    Quote,
+    Trade,
+    TradeCancel,
+    TradeCorrection,
+    TradingStatus,
+)
 
 log = logging.getLogger(__name__)
 

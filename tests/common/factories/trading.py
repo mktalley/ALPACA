@@ -1,5 +1,11 @@
-from alpaca.trading.enums import (AssetClass, OrderClass, OrderSide, OrderType,
-                                  PositionIntent, TimeInForce)
+from alpaca.trading.enums import (
+    AssetClass,
+    OrderClass,
+    OrderSide,
+    OrderType,
+    PositionIntent,
+    TimeInForce,
+)
 from alpaca.trading.models import Asset, Order
 
 

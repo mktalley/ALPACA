@@ -7,10 +7,14 @@ from alpaca.data.enums import Exchange, OptionsFeed
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.data.models.bars import BarSet
 from alpaca.data.models.trades import TradeSet
-from alpaca.data.requests import (OptionBarsRequest, OptionChainRequest,
-                                  OptionLatestQuoteRequest,
-                                  OptionLatestTradeRequest,
-                                  OptionSnapshotRequest, OptionTradesRequest)
+from alpaca.data.requests import (
+    OptionBarsRequest,
+    OptionChainRequest,
+    OptionLatestQuoteRequest,
+    OptionLatestTradeRequest,
+    OptionSnapshotRequest,
+    OptionTradesRequest,
+)
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 

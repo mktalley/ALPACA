@@ -7,24 +7,41 @@ from pydantic import TypeAdapter
 from alpaca.common import RawData
 from alpaca.common.enums import BaseURL
 from alpaca.common.rest import RESTClient
-from alpaca.common.utils import (validate_symbol_or_asset_id,
-                                 validate_symbol_or_contract_id,
-                                 validate_uuid_id_param)
-from alpaca.trading.models import (AccountConfiguration, Asset, Calendar,
-                                   Clock, ClosePositionResponse,
-                                   CorporateActionAnnouncement, OptionContract,
-                                   OptionContractsResponse, Order,
-                                   PortfolioHistory, Position, TradeAccount,
-                                   Watchlist)
-from alpaca.trading.requests import (CancelOrderResponse, ClosePositionRequest,
-                                     CreateWatchlistRequest, GetAssetsRequest,
-                                     GetCalendarRequest,
-                                     GetCorporateAnnouncementsRequest,
-                                     GetOptionContractsRequest,
-                                     GetOrderByIdRequest, GetOrdersRequest,
-                                     GetPortfolioHistoryRequest, OrderRequest,
-                                     ReplaceOrderRequest,
-                                     UpdateWatchlistRequest)
+from alpaca.common.utils import (
+    validate_symbol_or_asset_id,
+    validate_symbol_or_contract_id,
+    validate_uuid_id_param,
+)
+from alpaca.trading.models import (
+    AccountConfiguration,
+    Asset,
+    Calendar,
+    Clock,
+    ClosePositionResponse,
+    CorporateActionAnnouncement,
+    OptionContract,
+    OptionContractsResponse,
+    Order,
+    PortfolioHistory,
+    Position,
+    TradeAccount,
+    Watchlist,
+)
+from alpaca.trading.requests import (
+    CancelOrderResponse,
+    ClosePositionRequest,
+    CreateWatchlistRequest,
+    GetAssetsRequest,
+    GetCalendarRequest,
+    GetCorporateAnnouncementsRequest,
+    GetOptionContractsRequest,
+    GetOrderByIdRequest,
+    GetOrdersRequest,
+    GetPortfolioHistoryRequest,
+    OrderRequest,
+    ReplaceOrderRequest,
+    UpdateWatchlistRequest,
+)
 
 
 class TradingClient(RESTClient):

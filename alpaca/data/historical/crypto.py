@@ -6,13 +6,17 @@ from alpaca.common.types import Credentials, RawData
 from alpaca.data import Bar, Snapshot
 from alpaca.data.enums import CryptoFeed
 from alpaca.data.historical.utils import parse_obj_as_symbol_dict
-from alpaca.data.models import (BarSet, Orderbook, Quote, QuoteSet, Trade,
-                                TradeSet)
-from alpaca.data.requests import (CryptoBarsRequest, CryptoLatestBarRequest,
-                                  CryptoLatestOrderbookRequest,
-                                  CryptoLatestQuoteRequest,
-                                  CryptoLatestTradeRequest, CryptoQuoteRequest,
-                                  CryptoSnapshotRequest, CryptoTradesRequest)
+from alpaca.data.models import BarSet, Orderbook, Quote, QuoteSet, Trade, TradeSet
+from alpaca.data.requests import (
+    CryptoBarsRequest,
+    CryptoLatestBarRequest,
+    CryptoLatestOrderbookRequest,
+    CryptoLatestQuoteRequest,
+    CryptoLatestTradeRequest,
+    CryptoQuoteRequest,
+    CryptoSnapshotRequest,
+    CryptoTradesRequest,
+)
 
 
 class CryptoHistoricalDataClient(RESTClient):

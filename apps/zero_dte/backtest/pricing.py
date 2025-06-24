@@ -49,12 +49,13 @@ def get_stock_bars(
     that unit tests and documentation examples remain runnable offline.
     """
     try:
-        from alpaca.data.historical import \
-            StockHistoricalDataClient  # pylint: disable=import-error
-        from alpaca.data.requests import \
-            StockBarsRequest  # pylint: disable=import-error
-        from alpaca.data.timeframe import \
-            TimeFrame  # pylint: disable=import-error
+        from alpaca.data.historical import (
+            StockHistoricalDataClient,  # pylint: disable=import-error
+        )
+        from alpaca.data.requests import (
+            StockBarsRequest,  # pylint: disable=import-error
+        )
+        from alpaca.data.timeframe import TimeFrame  # pylint: disable=import-error
 
         key, secret = os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_API_SECRET")
         if key and secret:

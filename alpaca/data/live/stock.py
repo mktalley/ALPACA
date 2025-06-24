@@ -6,8 +6,7 @@ from alpaca.data.enums import DataFeed
 from alpaca.data.live.websocket import DataStream
 from alpaca.data.models.bars import Bar
 from alpaca.data.models.quotes import Quote
-from alpaca.data.models.trades import (Trade, TradeCancel, TradeCorrection,
-                                       TradingStatus)
+from alpaca.data.models.trades import Trade, TradeCancel, TradeCorrection, TradingStatus
 
 
 class StockDataStream(DataStream):

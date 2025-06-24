@@ -9,10 +9,15 @@ from alpaca.common.types import RawData
 from alpaca.data import Bar, Quote, Snapshot, Trade
 from alpaca.data.historical.utils import parse_obj_as_symbol_dict
 from alpaca.data.models import BarSet, QuoteSet, TradeSet
-from alpaca.data.requests import (StockBarsRequest, StockLatestBarRequest,
-                                  StockLatestQuoteRequest,
-                                  StockLatestTradeRequest, StockQuotesRequest,
-                                  StockSnapshotRequest, StockTradesRequest)
+from alpaca.data.requests import (
+    StockBarsRequest,
+    StockLatestBarRequest,
+    StockLatestQuoteRequest,
+    StockLatestTradeRequest,
+    StockQuotesRequest,
+    StockSnapshotRequest,
+    StockTradesRequest,
+)
 
 
 class StockHistoricalDataClient(RESTClient):

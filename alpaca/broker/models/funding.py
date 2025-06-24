@@ -2,10 +2,16 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from alpaca.broker.enums import (ACHRelationshipStatus, BankAccountType,
-                                 BankStatus, FeePaymentMethod, IdentifierType,
-                                 TransferDirection, TransferStatus,
-                                 TransferType)
+from alpaca.broker.enums import (
+    ACHRelationshipStatus,
+    BankAccountType,
+    BankStatus,
+    FeePaymentMethod,
+    IdentifierType,
+    TransferDirection,
+    TransferStatus,
+    TransferType,
+)
 from alpaca.common.models import ModelWithID
 
 

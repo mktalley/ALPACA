@@ -4,9 +4,12 @@ from typing import Dict, List, Optional, Union
 from alpaca.common.models import ValidateBaseModel as BaseModel
 from alpaca.common.types import RawData
 from alpaca.data.enums import Exchange
-from alpaca.data.mappings import (TRADE_CANCEL_MAPPING,
-                                  TRADE_CORRECTION_MAPPING, TRADE_MAPPING,
-                                  TRADING_STATUS_MAPPING)
+from alpaca.data.mappings import (
+    TRADE_CANCEL_MAPPING,
+    TRADE_CORRECTION_MAPPING,
+    TRADE_MAPPING,
+    TRADING_STATUS_MAPPING,
+)
 from alpaca.data.models.base import BaseDataSet, TimeSeriesMixin
 
 
