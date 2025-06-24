@@ -265,6 +265,13 @@ class Settings(BaseSettings):
     DAILY_PROFIT_TARGET: float = Field(0.0, description="Stop trading once we’ve made $X today (0 to disable)")
     DAILY_LOSS_LIMIT:    float = Field(0.0, description="Stop trading once we’ve lost $X today (0 to disable)")
     DAILY_DRAWDOWN_PCT: float = Field(0.03, description="Stop trading if cumulative drawdown >= X% of starting equity (default 3%)")
+    GAP_THRESHOLD_PCT: float = Field(0.006, description="Overnight gap ≥ this fraction triggers gap logic (e.g. 0.006 = 0.6%)")
+    REVERSE_RETRACE_MAX: float = Field(0.35, description="Max % retrace of gap we allow and still call it gap-and-go")
+    OPEN_VOL_MULTIPLIER: float = Field(1.5, description="Opening 5-min volume must exceed this × 20-day avg to confirm gap-and-go", validate_default=False)
+    SKEW_DELTA_NEAR: float = Field(0.10, description="Approx delta for threatened short strike on skewed strangle")
+    SKEW_DELTA_FAR: float = Field(0.03, description="Approx delta for safe far strike on skewed side")
+    SKIP_ON_GAP_AND_GO: bool = Field(False, description="If True we do not trade on confirmed gap-and-go days")
+    SHORT_DELTA_STOP: float = Field(0.25, description="Exit trade early if abs(short strike delta) exceeds this")
     DAILY_PROFIT_PCT: float = Field(0.0, description="Stop trading and liquidate when account equity increases by X% intraday (0 to disable)")
 
     ALPACA_API_KEY: str = ""
@@ -323,6 +330,9 @@ class Settings(BaseSettings):
         0.5, description="Maximum allowed IV rank (0-1) for anchor and event trades"
     )
 
+    VIX_HIGH: float = Field(
+        18.0, description="VIX threshold to switch to deep OTM strikes"
+    )
     TRADE_START: dt_time = Field(
         dt_time(10, 30), description="Earliest time to enter trades (ET)"
     )
@@ -331,17 +341,19 @@ class Settings(BaseSettings):
     )
 
     class Config:
-        env_file = "apps/zero_dte/.env"
+        env_file = ".env"
         env_file_encoding = "utf-8"
 
     @field_validator("EXIT_CUTOFF", mode="before")
-    VIX_HIGH: float = Field(18.0, description="VIX threshold to switch to deep OTM strikes")
-
     def parse_exit_time(cls, v):
         if isinstance(v, str):
             return dt_time.fromisoformat(v)
         return v
 
+
+
+# Instantiate global configuration once for runtime modules
+cfg = Settings()
 
 
 def setup_logging():
@@ -376,6 +388,56 @@ def setup_logging():
         filename=log_path, when='midnight', interval=1,
         backupCount=7, encoding='utf-8'
     )
+def detect_gap_and_go(stock_client: StockHistoricalDataClient, symbol: str, cfg: Settings) -> str | None:
+    """Return 'bullish', 'bearish', or None if no gap-and-go pattern detected."""
+    try:
+        et = ZoneInfo("America/New_York")
+        today = date.today()
+        prev = today - timedelta(days=1)
+        # fetch previous daily bar (may need loop over weekends/holidays)
+        for _ in range(5):
+            bars_prev = stock_client.get_stock_bars(
+                StockBarsRequest(symbol_or_symbols=[symbol], timeframe=TimeFrame.Day, start=prev, end=prev)
+            )
+            if bars_prev and bars_prev[symbol]:
+                prev_close = bars_prev[symbol][0].close
+                break
+            prev -= timedelta(days=1)
+        else:
+            logging.warning("Unable to fetch previous close for %s", symbol)
+            return None
+        # first minute bar of today
+        start_dt = datetime.combine(today, dt_time(9, 30), tzinfo=et)
+        end_dt = start_dt + timedelta(minutes=16)
+        bars_open = stock_client.get_stock_bars(
+            StockBarsRequest(symbol_or_symbols=[symbol], timeframe=TimeFrame.Minute, start=start_dt, end=end_dt)
+        )
+        if not bars_open or not bars_open[symbol]:
+            return None
+        open_bar = bars_open[symbol][0]
+        open_price = open_bar.open
+        gap_pct = (open_price - prev_close) / prev_close
+        if abs(gap_pct) < cfg.GAP_THRESHOLD_PCT:
+            return None
+        # compute 15-min high/low and retrace
+        highs = [b.high for b in bars_open[symbol]]
+        lows = [b.low for b in bars_open[symbol]]
+        high15 = max(highs)
+        low15 = min(lows)
+        if gap_pct > 0:
+            retrace = (open_price - low15) / (open_price - prev_close)
+            if retrace > cfg.REVERSE_RETRACE_MAX:
+                return None
+            return "bullish"
+        else:
+            retrace = (high15 - open_price) / abs(open_price - prev_close)
+            if retrace > cfg.REVERSE_RETRACE_MAX:
+                return None
+            return "bearish"
+    except Exception as e:
+        logging.warning("detect_gap_and_go error for %s: %s", symbol, e)
+        return None
+
     file_handler.suffix = "%Y-%m-%d"
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter(
@@ -524,46 +586,73 @@ def choose_otm_strangle_contracts(
     trading: TradingClient,
     stock_client: StockHistoricalDataClient,
     symbol: str,
+    option_client: OptionHistoricalDataClient,
+    bias: str | None = None,
+    cfg: Settings | None = None,
 ) -> tuple[str, str]:
     """
     Fetches today's option chain and returns the nearest OTM call and put symbols.
     """
+    # Fetch 0-DTE option chain for underlying
     today = date.today().isoformat()
-    option_resp = TradingClient.get_option_contracts(trading,
+    opt_resp = TradingClient.get_option_contracts(
+        trading,
         GetOptionContractsRequest(
-            underlying_symbols=[symbol],
-            expiration_date=today,
-            limit=500,
-        )
+            underlying_symbols=[symbol], expiration_date=today, limit=1000
+        ),
     )
-    if isinstance(option_resp, list):
-        chain = option_resp
-    else:
-        chain = option_resp.option_contracts or []
+    chain = opt_resp if isinstance(opt_resp, list) else opt_resp.option_contracts or []
+    if not chain:
+        raise RuntimeError(f"Empty option chain for {symbol} {today}")
+
     spot = get_underlying_price(stock_client, symbol)
 
-    # normalize contract type and strike attributes
-    def ct(c):
-        if hasattr(c, 'contract_type'):
-            return c.contract_type
-        t = getattr(c, 'type', None)
-        return t.value if hasattr(t, 'value') else t
+    def _ct(c):
+        return getattr(c, "contract_type", getattr(c, "type", "")).lower()
 
-    def st(c):
-        if hasattr(c, 'strike'):
-            return c.strike
-        return getattr(c, 'strike_price', 0)
+    def _strike(c):
+        return float(getattr(c, "strike", getattr(c, "strike_price", 0)))
 
-    # filter OTM calls and puts
-    calls = [c for c in chain if ct(c) == 'call' and st(c) > spot]
-    puts = [c for c in chain if ct(c) == 'put' and st(c) < spot]
+    # Bucket strikes by type
+    calls = [c for c in chain if _ct(c) == "call" and _strike(c) > spot]
+    puts = [c for c in chain if _ct(c) == "put" and _strike(c) < spot]
     if not calls or not puts:
-        raise RuntimeError(f"Could not find OTM strikes for {symbol} on {today}")
+        raise RuntimeError("Cannot locate OTM strikes for %s" % symbol)
 
-    # nearest OTM
-    call = min(calls, key=lambda c: st(c) - spot)
-    put = min(puts, key=lambda p: spot - st(p))
-    return call.symbol, put.symbol
+    # default symmetric deltas
+    near_delta = 0.15
+    far_delta  = 0.25
+    if cfg:
+        near_delta = cfg.SKEW_DELTA_NEAR or near_delta
+        far_delta  = cfg.SKEW_DELTA_FAR or far_delta
+    # if bias detected, skew deltas
+    call_target = near_delta if bias == "bearish" else far_delta if bias == "bullish" else near_delta
+    put_target  = near_delta if bias == "bullish" else far_delta if bias == "bearish" else near_delta
+
+    # Fetch greeks for all candidate symbols (bulk snapshot)
+    symbols = [c.symbol for c in calls] + [p.symbol for p in puts]
+    try:
+        snaps = OptionHistoricalDataClient.get_option_snapshot(
+            option_client, OptionSnapshotRequest(symbol_or_symbols=symbols)
+        )
+        deltas: dict[str, float] = {
+            s: abs((snap.greeks.delta or 0)) for s, snap in snaps.items() if snap.greeks
+        }
+    except Exception as e:
+        logging.warning("Delta lookup failed: %s – fallback to nearest-OTM", e)
+        # Simply choose nearest strikes
+        best_call = min(calls, key=lambda c: _strike(c) - spot)
+        best_put  = min(puts,  key=lambda p: spot - _strike(p))
+        return best_call.symbol, best_put.symbol
+
+    # Helper to pick symbol whose |delta| closest to target
+    def _pick(candidates, target):
+        best = min(candidates, key=lambda c: abs(deltas.get(c.symbol, 1) - target))
+        return best.symbol
+
+    call_sym = _pick(calls, call_target)
+    put_sym  = _pick(puts,  put_target)
+    return call_sym, put_sym
 
 
 def choose_iron_condor_contracts(
@@ -831,6 +920,21 @@ def monitor_and_exit_strangle(
         logging.debug(
             "Current strangle sum %s → %.4f", symbols, current_sum
         )
+        # Delta-based stop-loss
+        try:
+            snaps = OptionHistoricalDataClient.get_option_snapshot(
+                option_client,
+                OptionSnapshotRequest(symbol_or_symbols=symbols)
+            )
+            max_delta = max(abs(snap.greeks.delta) for snap in snaps.values() if snap.greeks and snap.greeks.delta is not None)
+            if max_delta >= cfg.SHORT_DELTA_STOP:
+                logging.info(
+                    "Delta stop triggered: |delta| %.2f >= %.2f", max_delta, cfg.SHORT_DELTA_STOP
+                )
+                break
+        except Exception as e:
+            logging.debug("Delta check error: %s", e)
+
         if current_sum >= target_sum:
             logging.info(
                 "Strangle target hit: %.4f >= %.4f", current_sum, target_sum
@@ -891,12 +995,14 @@ def run_strangle(
     target_pct: float,
     poll_interval: float,
     exit_cutoff: dt_time,
+    bias: str | None = None,
+    cfg: Settings | None = None,
 ):
     """
     Helper to place and monitor a single OTM strangle.
     """
     try:
-        call_sym, put_sym = choose_otm_strangle_contracts(trading, stock_client, symbol)
+        call_sym, put_sym = choose_otm_strangle_contracts(trading, stock_client, symbol, option_client, bias=bias, cfg=cfg)
         try:
             cfg = Settings()  # load settings for pre-trade filters
         except Exception as e:
@@ -1074,6 +1180,16 @@ def schedule_for_symbol(
     """Schedule and execute trades for a single symbol."""
     logging.info("Scheduling trades for symbol %s", symbol)
     # Prepare anchor times for today
+    # Detect day pattern once near the open (09:45 ET)
+    bias = detect_gap_and_go(stock_hist, symbol, cfg)
+    if bias:
+        logging.info("Gap-and-go detected for %s (%s)", symbol, bias)
+        if cfg.SKIP_ON_GAP_AND_GO:
+            logging.info("SKIP_ON_GAP_AND_GO=True; skipping all trades for %s today", symbol)
+            return
+    else:
+        logging.info("No gap-and-go for %s", symbol)
+
     today = date.today()
     trade_start_dt = datetime.combine(today, cfg.TRADE_START)
     # Use the earlier of TRADE_END or EXIT_CUTOFF for final anchor to avoid near-expiration entries
@@ -1100,7 +1216,20 @@ def schedule_for_symbol(
     last_spot = get_underlying_price(stock_hist, symbol)
 
     def _build_args(qty: int) -> tuple:
-        base = (
+        if strategy == "two_phase":
+            return (
+                trading,
+                stock_hist,
+                option_hist,
+                symbol,
+                qty,
+                cfg.PROFIT_TARGET_PCT,
+                cfg.POLL_INTERVAL,
+                cfg.EXIT_CUTOFF,
+                cfg.CONDOR_TARGET_PCT,
+            )
+        # default strangle args include bias & cfg
+        return (
             trading,
             stock_hist,
             option_hist,
@@ -1109,10 +1238,9 @@ def schedule_for_symbol(
             cfg.PROFIT_TARGET_PCT,
             cfg.POLL_INTERVAL,
             cfg.EXIT_CUTOFF,
+            bias,
+            cfg,
         )
-        if strategy == "two_phase":
-            return base + (cfg.CONDOR_TARGET_PCT,)
-        return base
 
     # Determine thread target
     if strategy == "two_phase":
@@ -1135,7 +1263,7 @@ def schedule_for_symbol(
             account = trading.get_account()
             current_equity = float(account.equity)
             # Calculate drawdown and profit percentages
-            drawdown_pct = (daily_start_equity - current_equity) / daily_start_equity if daily_start_equity > 0 else 0
+            drawdown_pct = max(0, (daily_start_equity - current_equity) / daily_start_equity) if daily_start_equity > 0 else 0
             profit_pct = (current_equity - daily_start_equity) / daily_start_equity if daily_start_equity > 0 else 0
             logging.info(
                 "Equity: %.2f, drawdown %.2f%%, profit %.2f%%",
