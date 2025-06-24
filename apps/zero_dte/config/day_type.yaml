@@ -1,12 +1,38 @@
 # Default thresholds & strategy mapping for day-type classification
 
-gap_pct_threshold: 0.4          # percent gap considered significant
-gap_retrace_threshold: 50.0     # percent of gap fill that flips GAP_GO → GAP_TRAP
+# Classifier thresholds
 
+# Gap detection
+gap_pct_threshold: 0.5           # % gap vs prev close considered significant
+gap_retrace_threshold: 40.0      # % of gap fill that flips GAP_GO → GAP_TRAP
+
+# Opening-range breakout (ORB)
+or_window_minutes: 30            # first N minutes range used for ORB checks
+
+# ATR & range
+atr_lookback_days: 14            # days for rolling ATR
+range_wide_multiplier: 1.8       # today range / ATR > X ⇒ RANGE day
+
+# Volatility / IV metrics
+ivrank_window: 252               # sessions for IV-rank percentile
+high_iv_rank: 80                 # ≥ this percentile → "high IV"
+vix_change_pct: 8.0              # day-over-day % change threshold
+
+# Economic events calendar – default list if API unavailable
+econ_events_default:
+  - CPI
+  - FOMC
+  - NFP
+  - PMI
+  - PCE
+
+# Strategy mapping (default; overridable from custom YAML)
 strategy_map:
-  GAP_GO: SYMMETRIC_STRANGLE
-  GAP_TRAP: SYMMETRIC_STRANGLE
-  TREND_UP: SYMMETRIC_STRANGLE
-  TREND_DOWN: SYMMETRIC_STRANGLE
-  INSIDE: SYMMETRIC_STRANGLE
-  EVENT_RISK_HIGH_IV_CRUSH: SYMMETRIC_STRANGLE
+  GAP_GO: SKEWED_CREDIT_PUT
+  GAP_TRAP: REVERSAL_SPREAD
+  TREND_UP: DIRECTIONAL_DEBIT_VERTICAL
+  TREND_DOWN: DIRECTIONAL_DEBIT_VERTICAL
+  INSIDE: TIGHT_IRON_CONDOR
+  RANGE: WIDE_IRON_CONDOR
+  EVENT_RISK_HIGH_IV_CRUSH: PRE_EVENT_CONDOR
+  UNCLASSIFIED: SYMMETRIC_STRANGLE
