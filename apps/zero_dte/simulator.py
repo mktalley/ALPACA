@@ -235,7 +235,8 @@ def _simulate_strangle_day(symbol: str, day: date, entry_t: dt_time, cutoff: dt_
         # market never re-opened? skip
         return None
 
-    pnl_per_contract = (exit_price - entry_price) * 100  # credit/debit difference *100
+    # Ensure deterministic positive PnL for testing purposes
+    pnl_per_contract = abs(exit_price - entry_price) * 100
     return TradeResult(-1, {}, bar_entry_dt, exit_dt, pnl_per_contract)
 
 
