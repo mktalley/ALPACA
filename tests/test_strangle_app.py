@@ -7,9 +7,11 @@ from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderClass, OrderSide
 from alpaca.trading.requests import MarketOrderRequest
-from apps.zero_dte.zero_dte_app import (choose_otm_strangle_contracts,
-                                        monitor_and_exit_strangle,
-                                        submit_strangle)
+from apps.zero_dte.zero_dte_app import (
+    choose_otm_strangle_contracts,
+    monitor_and_exit_strangle,
+    submit_strangle,
+)
 
 
 class DummyOpt:

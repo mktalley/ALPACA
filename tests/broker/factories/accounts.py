@@ -1,11 +1,16 @@
 from typing import List
 
 from alpaca.broker.enums import AgreementType, FundingSource, TaxIdType
-from alpaca.broker.models import (AccountDocument, Agreement, Contact,
-                                  Disclosures, Identity, TrustedContact)
+from alpaca.broker.models import (
+    AccountDocument,
+    Agreement,
+    Contact,
+    Disclosures,
+    Identity,
+    TrustedContact,
+)
 from alpaca.trading.enums import DTBPCheck, PDTCheck
-from alpaca.trading.models import \
-    AccountConfiguration as TradeAccountConfiguration
+from alpaca.trading.models import AccountConfiguration as TradeAccountConfiguration
 
 
 def create_dummy_identity() -> Identity:

@@ -6,15 +6,30 @@ from pydantic import Field, model_validator
 
 from alpaca.common.models import ModelWithID
 from alpaca.common.models import ValidateBaseModel as BaseModel
-from alpaca.trading.enums import (AccountStatus, ActivityType, AssetClass,
-                                  AssetExchange, AssetStatus, ContractType,
-                                  CorporateActionSubType, CorporateActionType,
-                                  DTBPCheck, ExerciseStyle,
-                                  NonTradeActivityStatus, OrderClass,
-                                  OrderSide, OrderStatus, OrderType, PDTCheck,
-                                  PositionIntent, PositionSide, TimeInForce,
-                                  TradeActivityType, TradeConfirmationEmail,
-                                  TradeEvent)
+from alpaca.trading.enums import (
+    AccountStatus,
+    ActivityType,
+    AssetClass,
+    AssetExchange,
+    AssetStatus,
+    ContractType,
+    CorporateActionSubType,
+    CorporateActionType,
+    DTBPCheck,
+    ExerciseStyle,
+    NonTradeActivityStatus,
+    OrderClass,
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    PDTCheck,
+    PositionIntent,
+    PositionSide,
+    TimeInForce,
+    TradeActivityType,
+    TradeConfirmationEmail,
+    TradeEvent,
+)
 
 
 class Asset(ModelWithID):

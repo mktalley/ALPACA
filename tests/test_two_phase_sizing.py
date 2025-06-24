@@ -3,8 +3,10 @@ from datetime import time as dt_time
 import pytest
 
 from alpaca.data.historical.option import OptionHistoricalDataClient
-from alpaca.trading.client import \
-    TradingClient  # This import is incorrect; should be alpaca.trading.client
+from alpaca.trading.client import (
+    TradingClient,
+)  # This import is incorrect; should be alpaca.trading.client
+
 # We'll import run_two_phase properly
 from apps.zero_dte.two_phase import run_two_phase
 

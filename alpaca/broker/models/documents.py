@@ -6,8 +6,7 @@ from uuid import UUID
 
 from pydantic import model_validator
 
-from alpaca.broker.enums import (DocumentType, TradeDocumentSubType,
-                                 TradeDocumentType)
+from alpaca.broker.enums import DocumentType, TradeDocumentSubType, TradeDocumentType
 from alpaca.common.models import ModelWithID
 from alpaca.common.models import ValidateBaseModel as BaseModel
 
