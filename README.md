@@ -6,6 +6,8 @@
 [![PyPI](https://img.shields.io/pypi/v/alpaca-py?color=blue)](https://pypi.org/project/alpaca-py/)
 
 ## Table of Contents
+- [Zero-DTE Back-testing](#zero-dte)
+
 
 - [About](#about)
 - [Documentation](#documentation)
@@ -62,6 +64,32 @@ Run the following command in your terminal:
 ```
 
 ## What’s New? <a name="whats-new"></a>
+
+## Zero-DTE Back-testing <a name="zero-dte"></a>
+
+The `apps.zero_dte` package provides a lightweight simulator for same-day (0-DTE) option strategies.
+
+Quick start (requires `poetry install` to set up deps):
+
+```bash
+# Back-test a single month with default grid
+poetry run zero-dte-backtest --underlying SPX --start 2025-05-01 --end 2025-05-31 --out results/spx_backtest.parquet
+
+# Walk-forward optimisation: 5-day train, 1-day test windows
+poetry run zero-dte-walk-forward --underlying SPX \
+    --start 2025-04-01 --end 2025-05-31 \
+    --train 5 --test 1 --out results/spx_walk.parquet
+```
+
+Script aliases are defined in `pyproject.toml` (`zero-dte-backtest`, `zero-dte-walk-forward`). You can also run via the Python module interface:
+
+```bash
+python -m apps.zero_dte.backtest --help
+python -m apps.zero_dte.walk_forward --help
+```
+
+See `apps/zero_dte/grids.py` for parameter grids and `apps/zero_dte/builders` for strategy wiring.
+
 
 If you’ve used the previous python SDK alpaca-trade-api, there are a few key differences to be aware of.
 

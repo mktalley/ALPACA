@@ -29,6 +29,7 @@ sseclient-py = "^1.7.2"
 [tool.poetry.scripts]
 zero-dte-backtest = "apps.zero_dte.backtest_cli:main"
 
+zero-dte-walk-forward = "apps.zero_dte.walk_forward:main"
 [tool.poetry.dev-dependencies]
 pytest = "^7.1"
 pytest-asyncio = "^0.23.7"
