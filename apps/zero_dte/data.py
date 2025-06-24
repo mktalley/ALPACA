@@ -211,22 +211,34 @@ def get_option_bars(
 
 
 def _synthetic_stock_bars(symbol: str, bar_date: date, start_price: float = 100.0) -> pd.DataFrame:
-    """Generate synthetic minute bars (random walk) for offline back-tests."""
+    """Generate synthetic minute bars (random walk) for offline back-tests.
+
+    The sequence is deterministic for a given (symbol, date) pair so unit tests
+    don’t depend on global ``random`` state or import order changes.
+    """
     minutes = 390  # 6.5h trading session
+
+    # Dedicated RNG seeded by the hash of (symbol, date) for repeatability
+    rnd = random.Random(hash((symbol, bar_date)) & 0xFFFFFFFF)
+
     prices = [start_price]
     for _ in range(minutes - 1):
-        prices.append(prices[-1] * (1 + random.gauss(0, 0.0005)))
-    rng = pd.date_range(
+        prices.append(prices[-1] * (1 + rnd.gauss(0, 0.0005)))
+
+    ts = pd.date_range(
         datetime.combine(bar_date, dt_time(9, 30), tzinfo=ZoneInfo("America/New_York")).astimezone(ZoneInfo("UTC")),
         periods=minutes,
         freq="min",
     )
-    df = pd.DataFrame({
-        "open": prices,
-        "high": [p * 1.001 for p in prices],
-        "low":  [p * 0.999 for p in prices],
-        "close": prices,
-    }, index=rng)
+    df = pd.DataFrame(
+        {
+            "open": prices,
+            "high": [p * 1.001 for p in prices],
+            "low": [p * 0.999 for p in prices],
+            "close": prices,
+        },
+        index=ts,
+    )
     return df
 
 
