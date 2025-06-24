@@ -5,15 +5,11 @@ from requests_mock import Mocker
 from alpaca.broker.client import BrokerClient
 from alpaca.broker.enums import WeightType
 from alpaca.broker.models import Portfolio, RebalancingRun, Subscription
-from alpaca.broker.requests import (
-    CreatePortfolioRequest,
-    CreateRunRequest,
-    CreateSubscriptionRequest,
-    GetPortfoliosRequest,
-    GetRunsRequest,
-    GetSubscriptionsRequest,
-    UpdatePortfolioRequest,
-)
+from alpaca.broker.requests import (CreatePortfolioRequest, CreateRunRequest,
+                                    CreateSubscriptionRequest,
+                                    GetPortfoliosRequest, GetRunsRequest,
+                                    GetSubscriptionsRequest,
+                                    UpdatePortfolioRequest)
 from alpaca.common.enums import BaseURL
 
 

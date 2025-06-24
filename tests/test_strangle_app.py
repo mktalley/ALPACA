@@ -1,16 +1,15 @@
-import pytest
-from alpaca.trading.client import TradingClient
-from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.historical.option import OptionHistoricalDataClient
 from datetime import time
 
-from apps.zero_dte.zero_dte_app import (
-    choose_otm_strangle_contracts,
-    submit_strangle,
-    monitor_and_exit_strangle,
-)
+import pytest
+
+from alpaca.data.historical.option import OptionHistoricalDataClient
+from alpaca.data.historical.stock import StockHistoricalDataClient
+from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderClass, OrderSide
 from alpaca.trading.requests import MarketOrderRequest
+from apps.zero_dte.zero_dte_app import (choose_otm_strangle_contracts,
+                                        monitor_and_exit_strangle,
+                                        submit_strangle)
 
 
 class DummyOpt:
@@ -48,7 +47,7 @@ def test_choose_otm_strangle(monkeypatch, fake_chain):
     )
 
     call_sym, put_sym = choose_otm_strangle_contracts(
-        trading=None, stock_client=None, symbol="SYM"
+        trading=None, stock_client=None, symbol="SYM", option_client=None
     )
     assert call_sym == "SYM_C_101"
     assert put_sym == "SYM_P_99"
@@ -58,7 +57,8 @@ def test_submit_strangle(monkeypatch):
     sold = {}
 
     def fake_submit(self, order_data):
-        sold['order'] = order_data
+        sold["order"] = order_data
+
         class R:
             pass
 
@@ -74,7 +74,7 @@ def test_submit_strangle(monkeypatch):
 
     resp = submit_strangle(trading=None, call_symbol="C1", put_symbol="P1", qty=2)
 
-    o: MarketOrderRequest = sold['order']
+    o: MarketOrderRequest = sold["order"]
     assert o.order_class == OrderClass.MLEG
     assert len(o.legs) == 2
     assert o.legs[0].symbol == "C1"
@@ -87,7 +87,6 @@ def test_monitor_and_exit_strangle(monkeypatch):
     prices = [2.0, 1.0]
 
 
-
 def test_run_strangle_sizing_capped(monkeypatch):
     """
     Test that run_strangle caps the quantity based on RISK_PCT_PER_TRADE and STOP_LOSS_PCT.
@@ -95,33 +94,42 @@ def test_run_strangle_sizing_capped(monkeypatch):
     Original qty=5 → capped to 2
     """
     from datetime import time as dt_time
+
     # Mock choose_otm_strangle_contracts
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.choose_otm_strangle_contracts",
-        lambda trading, stock_client, symbol: ("C1", "P1"),
+        lambda *args, **kwargs: ("C1", "P1"),
     )
+
     # Mock account equity
     class FakeAccount:
         equity = "1000"
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.TradingClient.get_account",
         lambda self: FakeAccount(),
     )
+
     # Mock option latest trade prices
     class FakeTrade:
         def __init__(self, price):
             self.price = price
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.OptionHistoricalDataClient.get_option_latest_trade",
         lambda self, req: {"C1": FakeTrade(10.0), "P1": FakeTrade(10.0)},
     )
     # Capture submitted qty
     submitted = {}
+
     def fake_submit(trading, call_sym, put_sym, qty):
-        submitted['qty'] = qty
+        submitted["qty"] = qty
+
         class DummyResp:
             legs = []
+
         return DummyResp()
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.submit_strangle",
         fake_submit,
@@ -133,6 +141,7 @@ def test_run_strangle_sizing_capped(monkeypatch):
     )
     # Run with original qty greater than max_contracts
     from apps.zero_dte.zero_dte_app import run_strangle
+
     result = run_strangle(
         trading=None,
         stock_client=None,
@@ -143,7 +152,9 @@ def test_run_strangle_sizing_capped(monkeypatch):
         poll_interval=0.01,
         exit_cutoff=dt_time(23, 59),
     )
-    assert submitted.get('qty') == 2, f"Expected qty capped to 2, got {submitted.get('qty')}"
+    assert (
+        submitted.get("qty") == 2
+    ), f"Expected qty capped to 2, got {submitted.get('qty')}"
 
 
 def test_run_strangle_sizing_no_cap(monkeypatch):
@@ -153,29 +164,38 @@ def test_run_strangle_sizing_no_cap(monkeypatch):
     Original qty=5 → remains 5
     """
     from datetime import time as dt_time
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.choose_otm_strangle_contracts",
-        lambda trading, stock_client, symbol: ("C1", "P1"),
+        lambda *args, **kwargs: ("C1", "P1"),
     )
+
     class FakeAccount:
         equity = "1000"
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.TradingClient.get_account",
         lambda self: FakeAccount(),
     )
+
     class FakeTrade:
         def __init__(self, price):
             self.price = price
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.OptionHistoricalDataClient.get_option_latest_trade",
         lambda self, req: {"C1": FakeTrade(1.0), "P1": FakeTrade(1.0)},
     )
     submitted = {}
+
     def fake_submit(trading, call_sym, put_sym, qty):
-        submitted['qty'] = qty
+        submitted["qty"] = qty
+
         class DummyResp:
             legs = []
+
         return DummyResp()
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.submit_strangle",
         fake_submit,
@@ -185,6 +205,7 @@ def test_run_strangle_sizing_no_cap(monkeypatch):
         lambda *args, **kwargs: 0.0,
     )
     from apps.zero_dte.zero_dte_app import run_strangle
+
     result = run_strangle(
         trading=None,
         stock_client=None,
@@ -195,7 +216,9 @@ def test_run_strangle_sizing_no_cap(monkeypatch):
         poll_interval=0.01,
         exit_cutoff=dt_time(23, 59),
     )
-    assert submitted.get('qty') == 5, f"Expected qty unchanged at 5, got {submitted.get('qty')}"
+    assert (
+        submitted.get("qty") == 5
+    ), f"Expected qty unchanged at 5, got {submitted.get('qty')}"
 
 
 def test_run_strangle_sizing_skip(monkeypatch):
@@ -204,35 +227,45 @@ def test_run_strangle_sizing_skip(monkeypatch):
     Equity=100, prices sum=200, STOP_LOSS_PCT=0.20 → risk_per_contract=40, allowed_risk=100*0.01=1 → max_contracts=0 -> skip
     """
     from datetime import time as dt_time
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.choose_otm_strangle_contracts",
-        lambda trading, stock_client, symbol: ("C1", "P1"),
+        lambda *args, **kwargs: ("C1", "P1"),
     )
+
     class FakeAccount:
         equity = "100"
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.TradingClient.get_account",
         lambda self: FakeAccount(),
     )
+
     class FakeTrade:
         def __init__(self, price):
             self.price = price
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.OptionHistoricalDataClient.get_option_latest_trade",
         lambda self, req: {"C1": FakeTrade(100.0), "P1": FakeTrade(100.0)},
     )
     # Capture if submit_strangle is called
-    called = {'invoked': False}
+    called = {"invoked": False}
+
     def fake_submit(trading, call_sym, put_sym, qty):
-        called['invoked'] = True
+        called["invoked"] = True
+
         class DummyResp:
             legs = []
+
         return DummyResp()
+
     monkeypatch.setattr(
         "apps.zero_dte.zero_dte_app.submit_strangle",
         fake_submit,
     )
     from apps.zero_dte.zero_dte_app import run_strangle
+
     result = run_strangle(
         trading=None,
         stock_client=None,
@@ -243,4 +276,4 @@ def test_run_strangle_sizing_skip(monkeypatch):
         poll_interval=0.01,
         exit_cutoff=dt_time(23, 59),
     )
-    assert not called['invoked'], "Expected skip of submit_strangle when qty < 1"
+    assert not called["invoked"], "Expected skip of submit_strangle when qty < 1"

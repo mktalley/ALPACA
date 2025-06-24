@@ -4,12 +4,9 @@ import pytest
 
 from alpaca.broker.client import BrokerClient
 from alpaca.common.enums import BaseURL
-from alpaca.trading.requests import (
-    CreateWatchlistRequest,
-    UpdateWatchlistRequest,
-)
-
 from alpaca.trading.models import Watchlist
+from alpaca.trading.requests import (CreateWatchlistRequest,
+                                     UpdateWatchlistRequest)
 
 
 def test_get_watchlists_for_account(reqmock, client: BrokerClient):

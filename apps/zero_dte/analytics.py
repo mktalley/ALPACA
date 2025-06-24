@@ -9,17 +9,18 @@ Columns expected:
 * entry_dt / exit_dt – timezone-aware datetimes
 * params – dict of the parameters used (flattened by caller if needed)
 """
+
 from __future__ import annotations
 
+import math
 from collections import defaultdict
 from typing import Mapping, Sequence
 
-import math
 import pandas as pd
 
 try:
-    import seaborn as sns  # type: ignore
     import matplotlib.pyplot as plt  # type: ignore
+    import seaborn as sns  # type: ignore
 except ModuleNotFoundError:  # pragma: no cover – plots optional in CI
     sns = None  # type: ignore
     plt = None  # type: ignore
@@ -72,7 +73,9 @@ def pivot_heatmap(
     If *outfile* is given, the PNG is saved there; otherwise plt.show().
     """
     if sns is None or plt is None:
-        raise RuntimeError("seaborn / matplotlib not available – install to use plotting helpers")
+        raise RuntimeError(
+            "seaborn / matplotlib not available – install to use plotting helpers"
+        )
 
     # Pivot into matrix
     table = df.pivot_table(index=y, columns=x, values=value, aggfunc=agg)
@@ -90,7 +93,9 @@ def pivot_heatmap(
 def equity_curve(df: pd.DataFrame, outfile: str | None = None):
     """Plot cumulative PnL over time (based on exit_dt chronological order)."""
     if sns is None or plt is None:
-        raise RuntimeError("seaborn / matplotlib not available – install to use plotting helpers")
+        raise RuntimeError(
+            "seaborn / matplotlib not available – install to use plotting helpers"
+        )
 
     track = df.sort_values("exit_dt")["pnl"].cumsum()
     fig, ax = plt.subplots(figsize=(8, 4))

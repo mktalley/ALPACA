@@ -1,12 +1,10 @@
 from typing import List
 
 from alpaca.common.enums import BaseURL
-from alpaca.trading.enums import CorporateActionType
-from alpaca.trading.models import (
-    CorporateActionAnnouncement,
-)
-from alpaca.trading.requests import GetCorporateAnnouncementsRequest
 from alpaca.trading.client import TradingClient
+from alpaca.trading.enums import CorporateActionType
+from alpaca.trading.models import CorporateActionAnnouncement
+from alpaca.trading.requests import GetCorporateAnnouncementsRequest
 
 
 def test_get_announcements(reqmock, trading_client: TradingClient):

@@ -1,11 +1,13 @@
 """Basic walk-forward test: ensure strategy tuned on train period produces >0 pnl on test period."""
+
 import datetime as _dt
+
 from apps.zero_dte.simulator import run_backtest
 
 TRAIN_START = _dt.date(2024, 6, 7)
-TRAIN_END   = _dt.date(2024, 6, 14)
-TEST_START  = _dt.date(2024, 6, 21)
-TEST_END    = _dt.date(2024, 6, 21)
+TRAIN_END = _dt.date(2024, 6, 14)
+TEST_START = _dt.date(2024, 6, 21)
+TEST_END = _dt.date(2024, 6, 21)
 
 
 def _best_params():

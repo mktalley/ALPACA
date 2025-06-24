@@ -5,15 +5,9 @@ import pytest
 from requests_mock import Mocker
 
 from alpaca.broker.client import BrokerClient, PaginationType
-from alpaca.broker.requests import (
-    GetAccountActivitiesRequest,
-)
+from alpaca.broker.requests import GetAccountActivitiesRequest
 from alpaca.common.enums import BaseURL
-from alpaca.trading.models import (
-    BaseActivity,
-    NonTradeActivity,
-    TradeActivity,
-)
+from alpaca.trading.models import BaseActivity, NonTradeActivity, TradeActivity
 
 
 def setup_reqmock_for_paginated_account_activities_response(reqmock: Mocker):

@@ -5,23 +5,29 @@ stub `classify_day()` implementation so that other parts of the bot can start
 wiring against the public interface while the statistical logic is filled in
 later iterations.
 """
+
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import date, datetime, time as dt_time, timedelta
+from datetime import date, datetime
+from datetime import time as dt_time
+from datetime import timedelta
 from enum import StrEnum
 from typing import Mapping
-from apps.zero_dte.config import load_daytype_config
 
 import pandas as pd
-from alpaca.data.historical import StockHistoricalDataClient, OptionHistoricalDataClient
+
+from alpaca.data.historical import (OptionHistoricalDataClient,
+                                    StockHistoricalDataClient)
 from alpaca.data.timeframe import TimeFrame
+from apps.zero_dte.config import load_daytype_config
 
 from .data import get_stock_bars
 
 log = logging.getLogger(__name__)
 
+import os
 
 # ---------------------------------------------------------------------------
 # Public enums (importable by the rest of the bot)
@@ -91,7 +97,9 @@ class StrategySelector:
                     log.warning("Invalid strategy_map entry %s -> %s", k, v)
         return cls(mapping=mapping)
 
-    mapping: Mapping[DayType, StrategyID] = field(default_factory=lambda: _DEFAULT_MAP.copy())
+    mapping: Mapping[DayType, StrategyID] = field(
+        default_factory=lambda: _DEFAULT_MAP.copy()
+    )
 
     def strategy_for_day(self, day_type: DayType) -> StrategyID:
         return self.mapping.get(day_type, StrategyID.SYMMETRIC_STRANGLE)
@@ -146,7 +154,11 @@ def classify_day(
     # 0. Economic calendar check via FMP (fallback to YAML)
     # ------------------------------------------------------------------
     try:
-        import requests, pytz, zoneinfo  # runtime deps only when used
+        import zoneinfo
+
+        import pytz
+        import requests  # runtime deps only when used
+
         api_key = os.getenv("FMP_API_KEY", "nAlmF6ETNXUum8UzPpAodz5V4cFcsPkM")
         url = f"https://financialmodelingprep.com/api/v3/economic_calendar?from={today}&to={today}&apikey={api_key}"
         resp = requests.get(url, timeout=5)
@@ -161,7 +173,10 @@ def classify_day(
         # fallback to static list
         events_default = cfg.get("econ_events_default", [])
         import yaml
-        cal_path = cfg.get("econ_calendar_path", "apps/zero_dte/data/econ_calendar.yaml")
+
+        cal_path = cfg.get(
+            "econ_calendar_path", "apps/zero_dte/data/econ_calendar.yaml"
+        )
         try:
             with open(cal_path) as fh:
                 _CAL = yaml.safe_load(fh) or {}
@@ -178,7 +193,9 @@ def classify_day(
     # ------------------------------------------------------------------
     try:
         bars_today = get_stock_bars(symbol, today, timeframe=TimeFrame.Minute)
-        bars_yday = get_stock_bars(symbol, today - timedelta(days=1), timeframe=TimeFrame.Minute)
+        bars_yday = get_stock_bars(
+            symbol, today - timedelta(days=1), timeframe=TimeFrame.Minute
+        )
     except Exception as exc:  # pragma: no cover – defensive
         log.warning("Cannot download bars – marking UNCLASSIFIED: %s", exc)
         return DayType.UNCLASSIFIED
@@ -233,7 +250,9 @@ def classify_day(
         return DayType.TREND_DOWN
 
     # Inside day if today range within y-day range
-    if (bars_today.high.max() <= bars_yday.high.max()) and (bars_today.low.min() >= bars_yday.low.min()):
+    if (bars_today.high.max() <= bars_yday.high.max()) and (
+        bars_today.low.min() >= bars_yday.low.min()
+    ):
         return DayType.INSIDE
 
     return DayType.UNCLASSIFIED

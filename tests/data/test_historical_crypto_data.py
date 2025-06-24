@@ -5,15 +5,10 @@ from typing import Dict
 from alpaca.data import Bar, Quote, Trade
 from alpaca.data.historical.crypto import CryptoHistoricalDataClient
 from alpaca.data.models import BarSet, QuoteSet, Snapshot, TradeSet
-from alpaca.data.requests import (
-    CryptoBarsRequest,
-    CryptoLatestBarRequest,
-    CryptoLatestQuoteRequest,
-    CryptoLatestTradeRequest,
-    CryptoQuoteRequest,
-    CryptoSnapshotRequest,
-    CryptoTradesRequest,
-)
+from alpaca.data.requests import (CryptoBarsRequest, CryptoLatestBarRequest,
+                                  CryptoLatestQuoteRequest,
+                                  CryptoLatestTradeRequest, CryptoQuoteRequest,
+                                  CryptoSnapshotRequest, CryptoTradesRequest)
 from alpaca.data.timeframe import TimeFrame
 
 

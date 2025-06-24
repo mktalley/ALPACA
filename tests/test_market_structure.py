@@ -1,11 +1,14 @@
-import pandas as pd
 from datetime import date, timedelta
 
-from apps.zero_dte.market_structure import classify_day, DayType
+import pandas as pd
+
+from apps.zero_dte.market_structure import DayType, classify_day
 
 
 def _make_bars(prices, day):
-    idx = pd.date_range(start=f"{day} 09:30", periods=len(prices), freq="T", tz="US/Eastern")
+    idx = pd.date_range(
+        start=f"{day} 09:30", periods=len(prices), freq="T", tz="US/Eastern"
+    )
     return pd.DataFrame(
         {
             "open": prices,
@@ -25,7 +28,9 @@ def _patch(monkeypatch, today_df, yday_df):
         return yday_df
 
     monkeypatch.setattr(
-        "apps.zero_dte.market_structure.get_stock_bars", fake_get_stock_bars, raising=True
+        "apps.zero_dte.market_structure.get_stock_bars",
+        fake_get_stock_bars,
+        raising=True,
     )
 
 
@@ -63,7 +68,9 @@ def test_trend_up(monkeypatch):
 
     _patch(monkeypatch, bars_today, bars_yday)
 
-    dt = classify_day("TEST", stock_client=None, cfg={"gap_pct_threshold": 2.0, "today": today})
+    dt = classify_day(
+        "TEST", stock_client=None, cfg={"gap_pct_threshold": 2.0, "today": today}
+    )
     assert dt == DayType.TREND_UP
 
 

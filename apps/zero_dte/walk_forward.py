@@ -8,23 +8,25 @@ simulate the chosen params on the following *test* period.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta, time as dt_time
-from pathlib import Path
 import argparse
-import os
 import json
+import os
+from datetime import date
+from datetime import time as dt_time
+from datetime import timedelta
+from pathlib import Path
 from typing import List
 
 import pandas as pd
 
-from .grids import parse_grid
 from .defaults import default_grid
-from .simulator import run_backtest, TradeResult
-
+from .grids import parse_grid
+from .simulator import TradeResult, run_backtest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _next_weekday(d: date, n: int) -> date:
     """Return date *n* weekdays (Mon–Fri) after *d* (inclusive count)."""
@@ -57,6 +59,7 @@ def _walk_splits(start: date, end: date, train_days: int, test_days: int):
 # Core walk-forward routine
 # ---------------------------------------------------------------------------
 
+
 def run_walk_forward(
     *,
     symbol: str,
@@ -69,6 +72,19 @@ def run_walk_forward(
     exit_cutoff: dt_time = dt_time(15, 45),
     strategy: str = "strangle",
 ):
+    # Ensure required market data cached for whole period
+    from datetime import timedelta
+
+    from .dl_missing import ensure_data
+
+    days = []
+    d = start
+    while d <= end:
+        if d.weekday() < 5:
+            days.append(d)
+        d += timedelta(days=1)
+    ensure_data(symbol, days)
+
     """Perform walk-forward optimisation returning list[TradeResult]."""
     all_trades: List[TradeResult] = []
     splits = list(_walk_splits(start, end, train_days, test_days))
@@ -117,6 +133,7 @@ def run_walk_forward(
 # CLI entry-point
 # ---------------------------------------------------------------------------
 
+
 def _d(s: str) -> date:
     return date.fromisoformat(s)
 
@@ -131,9 +148,13 @@ def main():
     ap.add_argument("--underlying", default="SPY")
     ap.add_argument("--start", type=_d, required=True)
     ap.add_argument("--end", type=_d, required=True)
-    ap.add_argument("--train", type=int, default=5, help="Training window length (weekdays)")
+    ap.add_argument(
+        "--train", type=int, default=5, help="Training window length (weekdays)"
+    )
     ap.add_argument("--test", type=int, default=1, help="Test window length (weekdays)")
-    ap.add_argument("--grid", default="", help="Grid string; default built-ins if empty")
+    ap.add_argument(
+        "--grid", default="", help="Grid string; default built-ins if empty"
+    )
     ap.add_argument("--entry", type=_dt, default=dt_time(9, 35))
     ap.add_argument("--cutoff", type=_dt, default=dt_time(15, 45))
     ap.add_argument("--strategy", choices=["strangle", "condor"], default="strangle")

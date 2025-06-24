@@ -4,18 +4,18 @@ Quick backtest for daily drawdowns on SPY over the past year using Alpaca Market
 Identifies days where the 1-day return exceeded the negative drawdown threshold (e.g., -5%).
 """
 import os
+import statistics
 import sys
 from datetime import datetime, timedelta
-import statistics
 
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 
 # Configuration
-API_KEY = os.getenv('ALPACA_API_KEY')
-API_SECRET = os.getenv('ALPACA_API_SECRET')
-SYMBOL = 'SPY'
-TIMEFRAME = '1Day'
+API_KEY = os.getenv("ALPACA_API_KEY")
+API_SECRET = os.getenv("ALPACA_API_SECRET")
+SYMBOL = "SPY"
+TIMEFRAME = "1Day"
 DRAWDOWN_PCT = 0.05  # 5% threshold
 
 
@@ -35,8 +35,8 @@ def main():
 
     request_params = StockBarsRequest(
         symbol_or_symbols=[SYMBOL],
-        start=start.isoformat() + 'Z',
-        end=end.isoformat() + 'Z',
+        start=start.isoformat() + "Z",
+        end=end.isoformat() + "Z",
         timeframe=TIMEFRAME,
         limit=1000,
     )
@@ -49,7 +49,7 @@ def main():
     # Compute daily returns
     returns = []  # list of (date, return)
     for i in range(1, len(bars)):
-        prev = bars[i-1]
+        prev = bars[i - 1]
         curr = bars[i]
         ret = (curr.close - prev.close) / prev.close
         returns.append((curr.timestamp.date(), ret))
@@ -68,5 +68,5 @@ def main():
         print(f"  {d}: {r:.2%}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

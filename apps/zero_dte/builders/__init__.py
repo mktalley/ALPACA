@@ -5,11 +5,12 @@ value to a callable that executes the strategy.  Only *SYMMETRIC_STRANGLE* is
 implemented (delegates to :pyfunc:`apps.zero_dte.zero_dte_app.run_strangle`).
 Other strategies raise *NotImplementedError* for now.
 """
+
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from typing import Protocol, Type
-import logging
 
 from apps.zero_dte.market_structure import StrategyID
 

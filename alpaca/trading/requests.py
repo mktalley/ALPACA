@@ -7,21 +7,12 @@ from pydantic import model_validator
 from alpaca.common.enums import Sort
 from alpaca.common.models import ModelWithID
 from alpaca.common.requests import NonEmptyRequest
-from alpaca.trading.enums import (
-    AssetClass,
-    AssetExchange,
-    AssetStatus,
-    ContractType,
-    CorporateActionDateType,
-    CorporateActionType,
-    ExerciseStyle,
-    OrderClass,
-    OrderSide,
-    OrderType,
-    PositionIntent,
-    QueryOrderStatus,
-    TimeInForce,
-)
+from alpaca.trading.enums import (AssetClass, AssetExchange, AssetStatus,
+                                  ContractType, CorporateActionDateType,
+                                  CorporateActionType, ExerciseStyle,
+                                  OrderClass, OrderSide, OrderType,
+                                  PositionIntent, QueryOrderStatus,
+                                  TimeInForce)
 
 
 class ClosePositionRequest(NonEmptyRequest):

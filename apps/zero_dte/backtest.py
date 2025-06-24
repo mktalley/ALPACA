@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import argparse
 import os
-from datetime import date, time as dt_time
-import pandas as pd
-
+from datetime import date
+from datetime import time as dt_time
 from pathlib import Path
 
-from .grids import parse_grid
+import pandas as pd
+
 from .defaults import default_grid
+from .grids import parse_grid
 from .simulator import run_backtest
 
 
@@ -59,10 +60,27 @@ def main():
     p.add_argument("--end", type=_d, required=True)
     p.add_argument("--entry", type=_dt, default=dt_time(9, 35))
     p.add_argument("--cutoff", type=_dt, default=dt_time(15, 45))
-    p.add_argument("--grid", required=False, default="", help="Grid string. If empty use built-in defaults.")
+    p.add_argument(
+        "--grid",
+        required=False,
+        default="",
+        help="Grid string. If empty use built-in defaults.",
+    )
     p.add_argument("--strategy", choices=["strangle", "condor"], default="strangle")
     p.add_argument("--out", required=False)
     args = p.parse_args()
+    # Ensure local option bars/greeks cache is available before simulation
+    from datetime import timedelta
+
+    from .dl_missing import ensure_data
+
+    day = args.start
+    needed = []
+    while day <= args.end:
+        if day.weekday() < 5:  # Mon-Fri only
+            needed.append(day)
+        day += timedelta(days=1)
+    ensure_data(args.underlying, needed)
 
     params = parse_grid(args.grid) if args.grid else default_grid()
     results = run_backtest(
@@ -82,7 +100,7 @@ def main():
         # Parquet for lossless persistence
         df.to_parquet(out_path)
         # CSV companion for quick eyeballing in spreadsheets
-        csv_path = out_path.with_suffix('.csv')
+        csv_path = out_path.with_suffix(".csv")
         df.to_csv(csv_path, index=False)
         print("Wrote", out_path, "and", csv_path)
     else:

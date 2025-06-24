@@ -1,32 +1,20 @@
-from alpaca.common.models import ModelWithID, ValidateBaseModel as BaseModel
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Union
 from uuid import UUID
-from datetime import datetime, date
-from typing import Any, Optional, List, Union, Dict
-from alpaca.trading.enums import (
-    AssetClass,
-    AssetStatus,
-    AssetExchange,
-    ContractType,
-    DTBPCheck,
-    ExerciseStyle,
-    OrderStatus,
-    OrderType,
-    OrderClass,
-    PDTCheck,
-    PositionIntent,
-    TimeInForce,
-    OrderSide,
-    PositionSide,
-    AccountStatus,
-    TradeActivityType,
-    NonTradeActivityStatus,
-    ActivityType,
-    CorporateActionType,
-    CorporateActionSubType,
-    TradeConfirmationEmail,
-    TradeEvent,
-)
+
 from pydantic import Field, model_validator
+
+from alpaca.common.models import ModelWithID
+from alpaca.common.models import ValidateBaseModel as BaseModel
+from alpaca.trading.enums import (AccountStatus, ActivityType, AssetClass,
+                                  AssetExchange, AssetStatus, ContractType,
+                                  CorporateActionSubType, CorporateActionType,
+                                  DTBPCheck, ExerciseStyle,
+                                  NonTradeActivityStatus, OrderClass,
+                                  OrderSide, OrderStatus, OrderType, PDTCheck,
+                                  PositionIntent, PositionSide, TimeInForce,
+                                  TradeActivityType, TradeConfirmationEmail,
+                                  TradeEvent)
 
 
 class Asset(ModelWithID):

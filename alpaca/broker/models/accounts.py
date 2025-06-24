@@ -2,16 +2,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import TypeAdapter, ValidationInfo, field_validator, model_validator
+from pydantic import (TypeAdapter, ValidationInfo, field_validator,
+                      model_validator)
 
-from alpaca.broker.enums import (
-    AgreementType,
-    ClearingBroker,
-    EmploymentStatus,
-    FundingSource,
-    TaxIdType,
-    VisaType,
-)
+from alpaca.broker.enums import (AgreementType, ClearingBroker,
+                                 EmploymentStatus, FundingSource, TaxIdType,
+                                 VisaType)
 from alpaca.broker.models.documents import AccountDocument
 from alpaca.common.models import ModelWithID
 from alpaca.common.models import ValidateBaseModel as BaseModel

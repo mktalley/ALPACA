@@ -12,6 +12,7 @@ initialiser and fails unless we provide this file.
 All actual work is delegated to the sibling top-level module
 ``apps.zero_dte.backtest`` to avoid code duplication.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -25,4 +26,3 @@ if hasattr(_cli_mod, "main"):
     sys.exit(_cli_mod.main())
 else:  # pragma: no cover – defensive guard
     raise SystemExit("apps.zero_dte.backtest has no 'main' callable")
-

@@ -3,9 +3,9 @@ Contains tests for Trading API's option routes.
 """
 
 from alpaca.common.enums import BaseURL
-from alpaca.trading.requests import GetOptionContractsRequest
 from alpaca.trading.client import TradingClient
 from alpaca.trading.models import OptionContract, OptionContractsResponse
+from alpaca.trading.requests import GetOptionContractsRequest
 
 
 def test_get_option_contracts(reqmock, trading_client: TradingClient):

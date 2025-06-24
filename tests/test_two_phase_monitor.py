@@ -1,6 +1,7 @@
-import pytest
-from datetime import time
 import logging
+from datetime import time
+
+import pytest
 
 import apps.zero_dte.two_phase as tp_module
 from alpaca.data.historical.option import OptionHistoricalDataClient
@@ -16,24 +17,26 @@ def make_fake_trades(symbols, prices):
     return {s: DummyTrade(p) for s, p in zip(symbols, prices)}
 
 
-@ pytest.mark.parametrize(
+@pytest.mark.parametrize(
     "prices, entry_credit, credit_target_pct, expected_pnl",
     [
-        ([3, 2, 1, 1], 2.0, 0.5, 1.0),   # profit scenario
+        ([3, 2, 1, 1], 2.0, 0.5, 1.0),  # profit scenario
         ([1, 1, 5, 5], 3.0, 0.5, -11.0),  # small loss scenario
-    ]
+    ],
 )
-
-def test_monitor_and_exit_condor_basic(prices, entry_credit, credit_target_pct, expected_pnl, monkeypatch, caplog):
-    symbols = ['A', 'B', 'C', 'D']
+def test_monitor_and_exit_condor_basic(
+    prices, entry_credit, credit_target_pct, expected_pnl, monkeypatch, caplog
+):
+    symbols = ["A", "B", "C", "D"]
     monkeypatch.setattr(
         OptionHistoricalDataClient,
-        'get_option_latest_trade',
-        lambda client, req: make_fake_trades(symbols, prices)
+        "get_option_latest_trade",
+        lambda client, req: make_fake_trades(symbols, prices),
     )
     monkeypatch.setattr(
-        TradingClient, 'submit_order',
-        lambda trading, order: type('R', (), {'id': 'x', 'status': 'filled'})
+        TradingClient,
+        "submit_order",
+        lambda trading, order: type("R", (), {"id": "x", "status": "filled"}),
     )
 
     caplog.set_level(logging.INFO)
@@ -45,7 +48,7 @@ def test_monitor_and_exit_condor_basic(prices, entry_credit, credit_target_pct, 
         qty=1,
         credit_target_pct=credit_target_pct,
         poll_interval=0,
-        exit_cutoff=time(23, 59)
+        exit_cutoff=time(23, 59),
     )
     assert result == pytest.approx(expected_pnl)
     # verify log contains correct PnL formatting
@@ -53,17 +56,18 @@ def test_monitor_and_exit_condor_basic(prices, entry_credit, credit_target_pct, 
 
 
 def test_monitor_and_exit_condor_cap(monkeypatch, caplog):
-    symbols = ['W', 'X', 'Y', 'Z']
+    symbols = ["W", "X", "Y", "Z"]
     prices = [0, 0, 2000, 2000]  # sold=0, bought=4000
     entry_credit = 3.0
     monkeypatch.setattr(
         OptionHistoricalDataClient,
-        'get_option_latest_trade',
-        lambda client, req: make_fake_trades(symbols, prices)
+        "get_option_latest_trade",
+        lambda client, req: make_fake_trades(symbols, prices),
     )
     monkeypatch.setattr(
-        TradingClient, 'submit_order',
-        lambda trading, order: type('R', (), {'id': 'x', 'status': 'filled'})
+        TradingClient,
+        "submit_order",
+        lambda trading, order: type("R", (), {"id": "x", "status": "filled"}),
     )
 
     cfg = tp_module.Settings()
@@ -76,7 +80,7 @@ def test_monitor_and_exit_condor_cap(monkeypatch, caplog):
         qty=1,
         credit_target_pct=0.5,
         poll_interval=0,
-        exit_cutoff=time(23, 59)
+        exit_cutoff=time(23, 59),
     )
     assert result == pytest.approx(-cfg.MAX_LOSS_PER_TRADE)
     # verify capped

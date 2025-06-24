@@ -1,12 +1,6 @@
+from alpaca.trading.enums import (AssetClass, OrderClass, OrderSide, OrderType,
+                                  PositionIntent, TimeInForce)
 from alpaca.trading.models import Asset, Order
-from alpaca.trading.enums import (
-    AssetClass,
-    OrderClass,
-    OrderSide,
-    OrderType,
-    PositionIntent,
-    TimeInForce,
-)
 
 
 def create_dummy_asset() -> Asset:

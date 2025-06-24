@@ -1,4 +1,5 @@
 """Command-line report generator for 0-DTE back-test parquet files."""
+
 from __future__ import annotations
 
 import argparse
@@ -6,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .analytics import metrics_from_trades, pivot_heatmap, equity_curve
+from .analytics import equity_curve, metrics_from_trades, pivot_heatmap
 
 
 def flatten_params(df: pd.DataFrame) -> pd.DataFrame:
@@ -21,7 +22,12 @@ def flatten_params(df: pd.DataFrame) -> pd.DataFrame:
 def main():
     ap = argparse.ArgumentParser("0-DTE back-test reporter")
     ap.add_argument("file", help="Parquet file output by apps.zero_dte.backtest")
-    ap.add_argument("--heat", nargs=2, metavar=("X", "Y"), help="Pivot two columns into a heat-map of mean PnL")
+    ap.add_argument(
+        "--heat",
+        nargs=2,
+        metavar=("X", "Y"),
+        help="Pivot two columns into a heat-map of mean PnL",
+    )
     ap.add_argument("--equity", action="store_true", help="Plot equity curve")
     args = ap.parse_args()
 

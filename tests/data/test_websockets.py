@@ -5,9 +5,8 @@ from msgpack.ext import Timestamp
 from pytz import utc
 
 from alpaca.data.enums import Exchange
-from alpaca.data.models import Bar, Trade, News
 from alpaca.data.live.websocket import DataStream
-from alpaca.data.models import Bar, Trade
+from alpaca.data.models import Bar, News, Trade
 from alpaca.data.models.news import News
 from alpaca.data.models.orderbooks import Orderbook, OrderbookQuote
 from alpaca.data.models.quotes import Quote

@@ -1,6 +1,6 @@
-from typing import Union, Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Optional, Union
+from uuid import UUID
 
 
 def validate_uuid_id_param(

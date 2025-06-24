@@ -3,8 +3,8 @@ from typing import Optional
 from uuid import UUID
 
 from alpaca.broker.enums import JournalEntryType, JournalStatus
-from alpaca.common.models import ModelWithID
 from alpaca.common.enums import SupportedCurrencies
+from alpaca.common.models import ModelWithID
 
 
 class Journal(ModelWithID):
