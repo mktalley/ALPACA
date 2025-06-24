@@ -93,8 +93,9 @@ def main():
         strategy=args.strategy,
     )
 
-    # dump to df
-    df = pd.DataFrame([r.__dict__ for r in results])
+    # Convert TradeResult dataclass instances → plain dicts even when slots=True
+    import dataclasses
+    df = pd.DataFrame([dataclasses.asdict(r) for r in results])
     if args.out:
         out_path = Path(args.out)
         # Parquet for lossless persistence
