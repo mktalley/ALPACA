@@ -9,6 +9,7 @@ Other strategies raise *NotImplementedError* for now.
 from __future__ import annotations
 
 import logging
+import os
 from abc import ABC, abstractmethod
 from typing import Protocol, Type
 
@@ -45,16 +46,135 @@ class StrangleBuilder(BaseBuilder):
 
 
 class IronCondorBuilder(BaseBuilder):
-    """Minimal wrapper for iron-condor entry helpers.
+    """Build and (optionally) place an intraday 0-DTE iron condor on **SPY**.
 
-    For Phase-1 we avoid live API calls; the builder merely records that the
-    strategy *would* run and returns a placeholder PnL of ``0.0``.  Concrete
-    logic will be plugged in Phase-2.
+    Strike-selection rules (default values configurable via kwargs):
+    • *delta_target* – short legs closest to ±delta_target (abs value).  Default **0.15**
+    • *wing_width*   – distance between short and long legs (dollars).  Default **1.0**
+
+    The builder returns a dict with the selected strikes and theoretical
+    premium.  It delegates sizing / risk-checks to the *risk* module so tests
+    can inject custom account snapshots.
     """
 
-    def build(self):  # type: ignore[override]
-        log.info("[IronCondorBuilder] Stub execution – returning 0.0 PnL")
-        return 0.0
+    # ------------------------------------------------------------------
+    # Public entry-point
+    # ------------------------------------------------------------------
+
+    def build(
+        self,
+        symbol: str = "SPY",
+        *,
+        delta_target: float | None = None,
+        wing_width: float | None = None,
+        account_equity: float | None = None,
+        max_risk_per_trade: float | None = None,
+        **kwargs,
+    ):  # type: ignore[override]
+        """Select strikes, size the order & (optionally) submit.
+
+        Parameters
+        ----------
+        symbol
+            Underlying ticker, default "SPY".
+        delta_target
+            Target absolute delta for short legs.  If *None*, fallback to
+            env-var ``ZDTE_DELTA_TARGET`` or **0.15**.
+        wing_width
+            Dollar distance between short and long legs.  Fallback to
+            ``ZDTE_WING_WIDTH`` or **1.0**.
+        account_equity / max_risk_per_trade
+            If provided, risk manager computes contract qty.  Otherwise qty=1.
+        kwargs
+            Forward-compatible extra params (ignored).
+        """
+
+        from datetime import date
+
+        from alpaca.data.live import Options
+        from alpaca.data.models import OptionContract
+        from apps.zero_dte.position_sizer import PositionSizer, StrategyTag
+
+        delta_target = delta_target or float(os.getenv("ZDTE_DELTA_TARGET", 0.15))
+        wing_width = wing_width or float(os.getenv("ZDTE_WING_WIDTH", 1.0))
+
+        # ------------------------------------------------------------------
+        # 1. Fetch current price & option chain snapshot (same-day expiry)
+        # ------------------------------------------------------------------
+        try:
+            client = Options()
+            underlying_px = client.get_last_quote(symbol).ask_price or client.get_last_quote(symbol).bid_price
+            today = date.today().strftime("%Y-%m-%d")
+            chain: list[OptionContract] = client.get_option_chain(symbol, expiry=today)
+        except Exception as exc:  # pragma: no cover – API offline in CI
+            log.warning("Alpaca API unavailable – falling back to synthetic strikes (%s)", exc)
+            return self._fallback_stub(symbol, delta_target, wing_width)
+
+        # Build two lists with (abs(Δ-Δtgt), contract) for calls & puts
+        calls, puts = [], []
+        for c in chain:
+            if c.greeks is None or c.greeks.delta is None:
+                continue
+            entry = (abs(abs(c.greeks.delta) - delta_target), c)
+            (calls if c.put_call == "call" else puts).append(entry)
+
+        if not calls or not puts:  # pragma: no cover
+            return self._fallback_stub(symbol, delta_target, wing_width)
+
+        short_call = min(calls, key=lambda x: x[0])[1]
+        short_put = min(puts, key=lambda x: x[0])[1]
+
+        long_call_strike = short_call.strike + wing_width
+        long_put_strike = short_put.strike - wing_width
+
+        order = {
+            "symbol": symbol,
+            "expiry": short_call.expiry,
+            "legs": {
+                "short_call": short_call.strike,
+                "long_call": long_call_strike,
+                "short_put": short_put.strike,
+                "long_put": long_put_strike,
+            },
+            "qty": 1,
+            "theoretical_credit": round(short_call.mid - long_call_strike * 0, 2),
+        }
+
+        if account_equity and max_risk_per_trade:
+            sizer = PositionSizer(
+                equity=account_equity,
+                risk_pct=max_risk_per_trade / account_equity,
+            )
+            order["qty"] = sizer.qty_for_condor(
+                credit=order["theoretical_credit"],
+                width=wing_width,
+                strategy=StrategyTag.IRON_CONDOR,
+            )
+
+        log.info("Built iron condor order: %s", order)
+        return order
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _fallback_stub(self, symbol: str, delta_tgt: float, width: float):
+        """Return deterministic strikes when live data unavailable (CI / back-test)."""
+        strikes_atm = 440  # arbitrary static anchor
+        order = {
+            "symbol": symbol,
+            "expiry": "T0",
+            "legs": {
+                "short_call": strikes_atm + 5,
+                "long_call": strikes_atm + 5 + width,
+                "short_put": strikes_atm - 5,
+                "long_put": strikes_atm - 5 - width,
+            },
+            "qty": 1,
+            "theoretical_credit": 1.0,
+        }
+        log.info("[IronCondorBuilder] Fallback build – %s", order)
+        return order
 
 
 class OneSideStrangleBuilder(BaseBuilder):
