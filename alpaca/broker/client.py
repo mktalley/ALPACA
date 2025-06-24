@@ -8,71 +8,116 @@ from pydantic import TypeAdapter
 from requests import HTTPError, Response
 
 from alpaca.broker.enums import ACHRelationshipStatus
-from alpaca.broker.models import (Account, ACHRelationship, Bank, BaseModel,
-                                  BatchJournalResponse, Journal, Order,
-                                  Portfolio, RebalancingRun, Subscription,
-                                  TradeAccount, TradeDocument, Transfer)
-from alpaca.broker.requests import (CreateAccountRequest,
-                                    CreateACHRelationshipRequest,
-                                    CreateACHTransferRequest,
-                                    CreateBankRequest,
-                                    CreateBankTransferRequest,
-                                    CreateBatchJournalRequest,
-                                    CreateJournalRequest,
-                                    CreateOptionExerciseRequest,
-                                    CreatePlaidRelationshipRequest,
-                                    CreatePortfolioRequest,
-                                    CreateReverseBatchJournalRequest,
-                                    CreateRunRequest,
-                                    CreateSubscriptionRequest,
-                                    GetAccountActivitiesRequest,
-                                    GetEventsRequest, GetJournalsRequest,
-                                    GetPortfoliosRequest, GetRunsRequest,
-                                    GetSubscriptionsRequest,
-                                    GetTradeDocumentsRequest,
-                                    GetTransfersRequest, ListAccountsRequest,
-                                    OrderRequest, UpdateAccountRequest,
-                                    UpdatePortfolioRequest,
-                                    UploadDocumentRequest)
+from alpaca.broker.models import (
+    Account,
+    ACHRelationship,
+    Bank,
+    BaseModel,
+    BatchJournalResponse,
+    Journal,
+    Order,
+    Portfolio,
+    RebalancingRun,
+    Subscription,
+    TradeAccount,
+    TradeDocument,
+    Transfer,
+)
+from alpaca.broker.requests import (
+    CreateAccountRequest,
+    CreateACHRelationshipRequest,
+    CreateACHTransferRequest,
+    CreateBankRequest,
+    CreateBankTransferRequest,
+    CreateBatchJournalRequest,
+    CreateJournalRequest,
+    CreateOptionExerciseRequest,
+    CreatePlaidRelationshipRequest,
+    CreatePortfolioRequest,
+    CreateReverseBatchJournalRequest,
+    CreateRunRequest,
+    CreateSubscriptionRequest,
+    GetAccountActivitiesRequest,
+    GetEventsRequest,
+    GetJournalsRequest,
+    GetPortfoliosRequest,
+    GetRunsRequest,
+    GetSubscriptionsRequest,
+    GetTradeDocumentsRequest,
+    GetTransfersRequest,
+    ListAccountsRequest,
+    OrderRequest,
+    UpdateAccountRequest,
+    UpdatePortfolioRequest,
+    UploadDocumentRequest,
+)
 from alpaca.common import RawData
-from alpaca.common.constants import (ACCOUNT_ACTIVITIES_DEFAULT_PAGE_SIZE,
-                                     BROKER_DOCUMENT_UPLOAD_LIMIT)
+from alpaca.common.constants import (
+    ACCOUNT_ACTIVITIES_DEFAULT_PAGE_SIZE,
+    BROKER_DOCUMENT_UPLOAD_LIMIT,
+)
 from alpaca.common.enums import BaseURL, PaginationType
 from alpaca.common.exceptions import APIError
 from alpaca.common.rest import HTTPResult, RESTClient
-from alpaca.common.utils import (validate_symbol_or_asset_id,
-                                 validate_symbol_or_contract_id,
-                                 validate_uuid_id_param)
+from alpaca.common.utils import (
+    validate_symbol_or_asset_id,
+    validate_symbol_or_contract_id,
+    validate_uuid_id_param,
+)
 from alpaca.trading.enums import ActivityType
-from alpaca.trading.models import \
-    AccountConfiguration as TradeAccountConfiguration
-from alpaca.trading.models import (AllAccountsPositions, Asset, BaseActivity,
-                                   Calendar, Clock, ClosePositionResponse,
-                                   CorporateActionAnnouncement,
-                                   NonTradeActivity, PortfolioHistory,
-                                   Position, TradeActivity, Watchlist)
-from alpaca.trading.requests import (CancelOrderResponse, ClosePositionRequest,
-                                     CreateWatchlistRequest, GetAssetsRequest,
-                                     GetCalendarRequest,
-                                     GetCorporateAnnouncementsRequest,
-                                     GetOrderByIdRequest, GetOrdersRequest,
-                                     GetPortfolioHistoryRequest,
-                                     ReplaceOrderRequest,
-                                     UpdateWatchlistRequest)
+from alpaca.trading.models import AccountConfiguration as TradeAccountConfiguration
+from alpaca.trading.models import (
+    AllAccountsPositions,
+    Asset,
+    BaseActivity,
+    Calendar,
+    Clock,
+    ClosePositionResponse,
+    CorporateActionAnnouncement,
+    NonTradeActivity,
+    PortfolioHistory,
+    Position,
+    TradeActivity,
+    Watchlist,
+)
+from alpaca.trading.requests import (
+    CancelOrderResponse,
+    ClosePositionRequest,
+    CreateWatchlistRequest,
+    GetAssetsRequest,
+    GetCalendarRequest,
+    GetCorporateAnnouncementsRequest,
+    GetOrderByIdRequest,
+    GetOrdersRequest,
+    GetPortfolioHistoryRequest,
+    ReplaceOrderRequest,
+    UpdateWatchlistRequest,
+)
 
 from ..common import RawData
 from ..common.rest import HTTPResult, RESTClient
 from .enums import ACHRelationshipStatus
-from .requests import (CreateAccountRequest, CreateACHRelationshipRequest,
-                       CreateACHTransferRequest, CreateBankRequest,
-                       CreateBankTransferRequest, CreateBatchJournalRequest,
-                       CreateJournalRequest, CreatePlaidRelationshipRequest,
-                       CreateReverseBatchJournalRequest,
-                       GetAccountActivitiesRequest, GetEventsRequest,
-                       GetJournalsRequest, GetTradeDocumentsRequest,
-                       GetTransfersRequest, ListAccountsRequest, OrderRequest,
-                       UpdateAccountRequest, UploadDocumentRequest,
-                       UploadW8BenDocumentRequest)
+from .requests import (
+    CreateAccountRequest,
+    CreateACHRelationshipRequest,
+    CreateACHTransferRequest,
+    CreateBankRequest,
+    CreateBankTransferRequest,
+    CreateBatchJournalRequest,
+    CreateJournalRequest,
+    CreatePlaidRelationshipRequest,
+    CreateReverseBatchJournalRequest,
+    GetAccountActivitiesRequest,
+    GetEventsRequest,
+    GetJournalsRequest,
+    GetTradeDocumentsRequest,
+    GetTransfersRequest,
+    ListAccountsRequest,
+    OrderRequest,
+    UpdateAccountRequest,
+    UploadDocumentRequest,
+    UploadW8BenDocumentRequest,
+)
 
 
 class BrokerClient(RESTClient):

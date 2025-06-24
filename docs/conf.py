@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath("../"))
 
 import alpaca.data.models.corporate_actions  # noqa # pylint: disable=unused-import
 import alpaca.data.models.news  # noqa # pylint: disable=unused-import
+
 # import a module here to avoid an error of:
 # NameError: Field "model_fields" conflicts with member {} of protected namespace "model_".
 # ref. https://github.com/pydantic/pydantic/discussions/7763#discussioncomment-8417097

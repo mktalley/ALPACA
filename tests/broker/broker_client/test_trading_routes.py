@@ -4,10 +4,17 @@ from uuid import UUID
 from alpaca.broker.client import BrokerClient
 from alpaca.broker.models import Order
 from alpaca.common.enums import BaseURL
-from alpaca.trading.models import (AllAccountsPositions, ClosePositionResponse,
-                                   PortfolioHistory, Position)
-from alpaca.trading.requests import (CancelOrderResponse, ClosePositionRequest,
-                                     GetPortfolioHistoryRequest)
+from alpaca.trading.models import (
+    AllAccountsPositions,
+    ClosePositionResponse,
+    PortfolioHistory,
+    Position,
+)
+from alpaca.trading.requests import (
+    CancelOrderResponse,
+    ClosePositionRequest,
+    GetPortfolioHistoryRequest,
+)
 
 
 def test_get_all_accounts_positions(reqmock, client: BrokerClient):

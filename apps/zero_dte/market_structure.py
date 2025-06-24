@@ -18,8 +18,7 @@ from typing import Mapping
 
 import pandas as pd
 
-from alpaca.data.historical import (OptionHistoricalDataClient,
-                                    StockHistoricalDataClient)
+from alpaca.data.historical import OptionHistoricalDataClient, StockHistoricalDataClient
 from alpaca.data.timeframe import TimeFrame
 from apps.zero_dte.config import load_daytype_config
 

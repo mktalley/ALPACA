@@ -2,8 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from alpaca.broker.enums import (PortfolioStatus, RunInitiatedFrom, RunStatus,
-                                 RunType)
+from alpaca.broker.enums import PortfolioStatus, RunInitiatedFrom, RunStatus, RunType
 from alpaca.broker.models import Order
 from alpaca.broker.requests import RebalancingConditions, Weight
 from alpaca.common.models import ValidateBaseModel as BaseModel

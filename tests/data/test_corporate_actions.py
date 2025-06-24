@@ -3,10 +3,14 @@ from datetime import date, datetime, timezone
 
 from alpaca.data.enums import CorporateActionsType
 from alpaca.data.historical.corporate_actions import CorporateActionsClient
-from alpaca.data.models.corporate_actions import (CashDividend,
-                                                  CorporateActionsSet,
-                                                  ForwardSplit, ReverseSplit,
-                                                  StockDividend, UnitSplit)
+from alpaca.data.models.corporate_actions import (
+    CashDividend,
+    CorporateActionsSet,
+    ForwardSplit,
+    ReverseSplit,
+    StockDividend,
+    UnitSplit,
+)
 from alpaca.data.requests import CorporateActionsRequest
 
 

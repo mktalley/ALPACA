@@ -1,7 +1,6 @@
 import pytest
 
-from apps.zero_dte.builders import (IronCondorBuilder, StrangleBuilder,
-                                    select_builder)
+from apps.zero_dte.builders import IronCondorBuilder, StrangleBuilder, select_builder
 from apps.zero_dte.market_structure import StrategyID
 
 

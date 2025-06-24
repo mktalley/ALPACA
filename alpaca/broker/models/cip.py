@@ -2,8 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from alpaca.broker.enums import (CIPApprovalStatus, CIPProvider, CIPResult,
-                                 CIPStatus)
+from alpaca.broker.enums import CIPApprovalStatus, CIPProvider, CIPResult, CIPStatus
 from alpaca.common.models import ModelWithID
 from alpaca.common.models import ValidateBaseModel as BaseModel
 

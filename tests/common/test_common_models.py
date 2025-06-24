@@ -4,15 +4,27 @@ from uuid import UUID
 import pytest
 from factories import create_dummy_order
 
-from alpaca.trading.enums import (AssetClass, AssetExchange,
-                                  CorporateActionSubType, CorporateActionType,
-                                  OrderClass, OrderSide, OrderType,
-                                  PositionIntent, PositionSide, TimeInForce)
-from alpaca.trading.models import (Calendar, Clock, ClosePositionResponse,
-                                   CorporateActionAnnouncement, Order,
-                                   Position)
-from alpaca.trading.requests import (ClosePositionRequest,
-                                     UpdateWatchlistRequest)
+from alpaca.trading.enums import (
+    AssetClass,
+    AssetExchange,
+    CorporateActionSubType,
+    CorporateActionType,
+    OrderClass,
+    OrderSide,
+    OrderType,
+    PositionIntent,
+    PositionSide,
+    TimeInForce,
+)
+from alpaca.trading.models import (
+    Calendar,
+    Clock,
+    ClosePositionResponse,
+    CorporateActionAnnouncement,
+    Order,
+    Position,
+)
+from alpaca.trading.requests import ClosePositionRequest, UpdateWatchlistRequest
 
 
 def test_clock_timestamps():

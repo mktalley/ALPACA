@@ -9,10 +9,14 @@ from alpaca.data.models.bars import BarSet
 from alpaca.data.models.quotes import Quote
 from alpaca.data.models.snapshots import OptionsSnapshot
 from alpaca.data.models.trades import Trade, TradeSet
-from alpaca.data.requests import (OptionBarsRequest, OptionChainRequest,
-                                  OptionLatestQuoteRequest,
-                                  OptionLatestTradeRequest,
-                                  OptionSnapshotRequest, OptionTradesRequest)
+from alpaca.data.requests import (
+    OptionBarsRequest,
+    OptionChainRequest,
+    OptionLatestQuoteRequest,
+    OptionLatestTradeRequest,
+    OptionSnapshotRequest,
+    OptionTradesRequest,
+)
 
 
 class OptionHistoricalDataClient(RESTClient):
