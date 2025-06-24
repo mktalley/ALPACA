@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time as dt_time, timedelta
 from enum import StrEnum
 from typing import Mapping
+from apps.zero_dte.config import load_daytype_config
 
 import pandas as pd
 from alpaca.data.historical import StockHistoricalDataClient, OptionHistoricalDataClient
@@ -77,6 +78,19 @@ class StrategySelector:
     The mapping can be overridden via *mapping* (e.g. parsed from YAML).
     """
 
+    @classmethod
+    def from_config(cls, cfg: Mapping[str, object] | None = None) -> "StrategySelector":
+        mapping = _DEFAULT_MAP.copy()
+        if cfg and "strategy_map" in cfg:
+            for k, v in cfg["strategy_map"].items():
+                try:
+                    dt = DayType(k)
+                    sid = StrategyID(v)
+                    mapping[dt] = sid
+                except ValueError:
+                    log.warning("Invalid strategy_map entry %s -> %s", k, v)
+        return cls(mapping=mapping)
+
     mapping: Mapping[DayType, StrategyID] = field(default_factory=lambda: _DEFAULT_MAP.copy())
 
     def strategy_for_day(self, day_type: DayType) -> StrategyID:
@@ -112,8 +126,9 @@ def classify_day(
     keep the bot operational while we iterate on richer metrics.
     """
 
-    if cfg is None:
-        cfg = {}
+    # Merge runtime overrides with YAML defaults (runtime wins)
+    yaml_cfg = load_daytype_config()
+    cfg = {**yaml_cfg, **(cfg or {})}
 
     today = cfg.get("today", date.today())
     log.debug("Classifying day-type for %s on %s", symbol, today)

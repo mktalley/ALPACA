@@ -1,0 +1,12 @@
+# Default thresholds & strategy mapping for day-type classification
+
+gap_pct_threshold: 0.4          # percent gap considered significant
+gap_retrace_threshold: 50.0     # percent of gap fill that flips GAP_GO → GAP_TRAP
+
+strategy_map:
+  GAP_GO: SYMMETRIC_STRANGLE
+  GAP_TRAP: SYMMETRIC_STRANGLE
+  TREND_UP: SYMMETRIC_STRANGLE
+  TREND_DOWN: SYMMETRIC_STRANGLE
+  INSIDE: SYMMETRIC_STRANGLE
+  EVENT_RISK_HIGH_IV_CRUSH: SYMMETRIC_STRANGLE
