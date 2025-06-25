@@ -30,6 +30,10 @@ class StrangleSimulator:
         qty: int,
         stop_loss_pct: float = 0.20,
         profit_target_pct: float = 0.65,
+        *,
+        slippage: float = 0.0,  # absolute $ per contract, per side
+        commission: float = 0.0,  # absolute $ per contract, per side
+        legs: int = 2,
         exit_cutoff: dt_time | None = None,
     ) -> None:
         self.bars = bars
@@ -39,27 +43,40 @@ class StrangleSimulator:
         self.stop_loss = entry_credit * (1 + stop_loss_pct)
         self.profit_target = entry_credit * (1 - profit_target_pct)
         self.exit_cutoff = exit_cutoff or dt_time(22, 45)
+        self.slippage = slippage
+        self.commission = commission
+        self.legs = legs
 
     def run(self) -> TradeResult:
         idx = self.bars.index
         after_entry = idx >= self.entry_time
-        # synthetic mid-credit path = entry ± 0.2% of underlying move
-        rel_move = self.bars.loc[after_entry, "close"].pct_change().fillna(0).cumsum()
+
+        prices = self.bars.loc[after_entry, "close"]
+        rel_move = prices.pct_change().fillna(0).cumsum()
         mid = self.entry_credit * (1 + 0.2 * rel_move)
 
-        # exit conditions
         hit_target = mid <= self.profit_target
         hit_stop = mid >= self.stop_loss
-        cutoff_mask = self.bars.index.time >= self.exit_cutoff
+        cutoff_mask = mid.index.time >= self.exit_cutoff
 
         exit_idx = np.where(hit_target | hit_stop | cutoff_mask)[0]
-        exit_pos = exit_idx[0] if len(exit_idx) else -1
+        exit_pos = int(exit_idx[0]) if len(exit_idx) else -1
 
         exit_credit = float(mid.iloc[exit_pos])
-        exit_time = idx[after_entry][exit_pos]
-        pnl = (
-            (self.entry_credit - exit_credit) * 100 * self.qty
-        )  # credit received minus cost to buy back
+        exit_time = mid.index[exit_pos]
+
+        # cost = buy-back mid + slippage per leg + commission per leg
+        cost_to_close = (
+            exit_credit
+            + self.slippage * self.legs
+            + self.commission * self.legs
+        )
+        open_credit = (
+            self.entry_credit
+            - self.slippage * self.legs
+            - self.commission * self.legs
+        )
+        pnl = (open_credit - cost_to_close) * 100 * self.qty
         return TradeResult(
-            self.qty, self.entry_time, exit_time, self.entry_credit, exit_credit, pnl
+            self.qty, self.entry_time, exit_time, open_credit, cost_to_close, pnl
         )

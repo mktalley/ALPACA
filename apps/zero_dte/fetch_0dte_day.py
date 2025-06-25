@@ -156,7 +156,7 @@ def main():
     # ------------------------------------------------------------------
     from alpaca.data.requests import OptionSnapshotRequest
 
-    SNAP_CHUNK = 400  # snapshot limit lower
+    SNAP_CHUNK = 100  # Alpaca snapshot API hard limit
     snaps = []
     for i in range(0, len(symbols), SNAP_CHUNK):
         chunk = symbols[i : i + SNAP_CHUNK]

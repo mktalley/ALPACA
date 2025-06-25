@@ -1,0 +1,9 @@
+# Parameter grid for Phase-2 optimisation (12-month window)
+# Any key here must be accepted by apps.zero_dte.Settings / simulator helpers.
+# Values are interpreted literally; times must be HH:MM 24-h strings.
+
+delta_target:  [0.10, 0.15, 0.20]
+wing_width:    [1.0, 1.5]
+stop_pct:      [0.60, 0.80]
+target_pct:    [0.25, 0.35, 0.45]
+entry_time:    ["09:45", "10:30"]
