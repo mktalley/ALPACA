@@ -1386,7 +1386,9 @@ def schedule_for_symbol(
         "DayType for %s → %s; mapped strategy %s", symbol, day_type, strategy_id
     )
     # Route unsupported strategies to placeholder (Phase-1 stub)
-    if strategy_id != StrategyID.SYMMETRIC_STRANGLE and strategy != "two_phase":
+    if strategy == "auto":
+        pass  # allow any mapped strategy, builder router will enforce validity
+    elif strategy_id != StrategyID.SYMMETRIC_STRANGLE and strategy != "two_phase":
         logging.info(
             "Strategy %s not implemented yet; skipping trading for %s",
             strategy_id,
@@ -1704,9 +1706,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--strategy",
-        choices=["strangle", "two_phase"],
+        choices=["strangle", "two_phase", "auto"],
         default="two_phase",
-        help="Trading strategy to run: single-phase strangle or two-phase flip",
+        help="Trading strategy to run: strangle | two_phase | auto", 
     )
     parser.add_argument(
         "--auto-reenter",

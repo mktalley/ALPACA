@@ -9,16 +9,24 @@ from typing import Union
 
 import pandas as pd
 
-from alpaca.data.historical.option import OptionHistoricalDataClient
-from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.requests import OptionBarsRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
+try:
+    from alpaca.data.historical.option import OptionHistoricalDataClient
+    from alpaca.data.historical.stock import StockHistoricalDataClient
+    from alpaca.data.requests import OptionBarsRequest, StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    _HAS_ALPACA = True
+except Exception:  # pragma: no cover
+    # SDK not available – we will fall back to synthetic bars via .pricing
+    _HAS_ALPACA = False
+    OptionHistoricalDataClient = StockHistoricalDataClient = None  # type: ignore
+    OptionBarsRequest = StockBarsRequest = TimeFrame = None  # type: ignore
 
 CACHE = Path(".cache_bt")
 CACHE.mkdir(exist_ok=True)
 
-_STOCK = StockHistoricalDataClient()
-_OPT = OptionHistoricalDataClient()
+_STOCK = StockHistoricalDataClient() if _HAS_ALPACA else None
+_OPT = OptionHistoricalDataClient() if _HAS_ALPACA else None
 
 
 def _fp(tag: str, symbol: str, start: date, end: date) -> Path:
@@ -33,8 +41,14 @@ def _load_or(tag: str, path: Path, fetch_func):
     return df
 
 
-def get_stock_bars(symbol: str, start: date, end: date) -> pd.DataFrame:
-    """1-min bars for the underlying – cached on first fetch."""
+def get_stock_bars(symbol: str, start: date, end: date):  # noqa: D401
+    """Return 1-minute underlying bars, *synthetic* if Alpaca unavailable."""
+
+    if not _HAS_ALPACA:
+        from .pricing import get_stock_bars as _fake  # local fallback
+
+        return _fake(symbol, start, end)
+
     p = _fp("stk1m", symbol, start, end)
     return _load_or(
         "stk1m",

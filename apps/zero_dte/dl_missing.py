@@ -21,7 +21,8 @@ def _have_greeks(ul: str, exp: date) -> bool:
 
 
 def _have_bars(ul: str, exp: date) -> bool:
-    return (_CACHE / "option_bars" / ul.upper() / f"{exp:%Y%m%d}.parquet").exists()
+    """True if minute option parquet for *ul, exp* already cached."""
+    return (_CACHE / "option" / ul.upper() / f"{exp:%Y%m%d}.parquet").exists()
 
 import os
 

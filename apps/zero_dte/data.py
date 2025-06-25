@@ -23,15 +23,44 @@ from datetime import timedelta
 from typing import Literal
 
 import pandas as pd
+try:
+    from alpaca.data.historical.option import OptionHistoricalDataClient
+    from alpaca.data.historical.stock import StockHistoricalDataClient
+    from alpaca.data.requests import OptionBarsRequest, StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+except Exception as _imp_err:  # pragma: no cover – offline/SDK mismatch
+    import types
 
-from alpaca.data.historical.option import OptionHistoricalDataClient
-from alpaca.data.historical.stock import StockHistoricalDataClient
-from alpaca.data.requests import OptionBarsRequest, StockBarsRequest
-from alpaca.data.timeframe import TimeFrame
+    class _StubClient:  # minimal stub that returns empty df attributes
+        def __init__(self, *a, **kw):
+            pass
+
+        def get_option_bars(self, *a, **kw):
+            return types.SimpleNamespace(df=pd.DataFrame())
+
+
+
+    class OptionHistoricalDataClient(_StubClient):
+        pass
+
+    class StockHistoricalDataClient(_StubClient):
+        pass
+
+    class OptionBarsRequest:  # type: ignore[empty-body]
+        def __init__(self, *a, **kw):
+            pass
+
+    class StockBarsRequest:  # type: ignore[empty-body]
+        def __init__(self, *a, **kw):
+            pass
+
+    class TimeFrame:  # minimal enum-like stub
+        Minute = "Minute"
 
 __all__ = [
     "get_option_bars",
     "get_stock_bars",
+    "AlpacaBarLoader",
 ]
 
 # ---------------------------------------------------------------------------
@@ -62,10 +91,14 @@ _option_client: OptionHistoricalDataClient | None = None
 def _ensure_clients() -> tuple[StockHistoricalDataClient, OptionHistoricalDataClient]:
     global _stock_client, _option_client
     if _stock_client is None:
-        _stock_client = StockHistoricalDataClient(
-            api_key=os.getenv("ALPACA_API_KEY"),
-            secret_key=os.getenv("ALPACA_API_SECRET"),
-        )
+        try:
+            _stock_client = StockHistoricalDataClient(
+                api_key=os.getenv("ALPACA_API_KEY"),
+                secret_key=os.getenv("ALPACA_API_SECRET"),
+            )
+        except TypeError:
+            # Newer Alpaca SDK no longer accepts explicit credentials in ctor – rely on env vars
+            _stock_client = StockHistoricalDataClient()
     if _option_client is None:
         _option_client = OptionHistoricalDataClient(
             api_key=os.getenv("ALPACA_API_KEY"),
@@ -159,6 +192,32 @@ def _write_parquet_safe(df: pd.DataFrame, path: Path) -> None:
     except (ImportError, ValueError, OSError):
         # Cannot write parquet – tolerate in test environment
         pass
+
+
+# ---------------------------------------------------------------------------
+# Composite loader – stitches contiguous days
+# ---------------------------------------------------------------------------
+
+class AlpacaBarLoader:
+    """Concatenate cached Alpaca (or synthetic) bars into an arbitrary interval."""
+
+    def __init__(self, timeframe: TimeFrame = TimeFrame.Minute):
+        self.timeframe = timeframe
+
+    def get(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+        if start >= end:
+            raise ValueError("start must be < end")
+        frames: list[pd.DataFrame] = []
+        day = start.date()
+        while day <= end.date():
+            df_day = get_stock_bars(symbol, day, self.timeframe)
+            if not df_day.empty:
+                frames.append(df_day)
+            day += timedelta(days=1)
+        if not frames:
+            return pd.DataFrame()
+        df_all = pd.concat(frames).sort_index()
+        return df_all[(df_all.index >= start) & (df_all.index < end)]
 
 
 def get_option_bars(
