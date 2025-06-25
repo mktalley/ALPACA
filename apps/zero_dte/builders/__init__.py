@@ -155,34 +155,41 @@ DirectionalVerticalBuilder = OneSideStrangleBuilder
             log.warning("Alpaca API unavailable – falling back to synthetic strikes (%s)", exc)
             return self._fallback_stub(symbol, delta_target, wing_width)
 
-        # Build two lists with (abs(Δ-Δtgt), contract) for calls & puts
-        calls, puts = [], []
-        for c in chain:
-            if c.greeks is None or c.greeks.delta is None:
-                continue
-            entry = (abs(abs(c.greeks.delta) - delta_target), c)
-            (calls if c.put_call == "call" else puts).append(entry)
+        # Choose strikes via shared delta-selector util
+        from apps.zero_dte.utils.delta import select_strikes
 
-        if not calls or not puts:  # pragma: no cover
+        try:
+            sp, lp, sc, lc = select_strikes(chain, delta_target, wing_width)
+        except ValueError:  # empty chain / missing deltas
             return self._fallback_stub(symbol, delta_target, wing_width)
 
-        short_call = min(calls, key=lambda x: x[0])[1]
-        short_put = min(puts, key=lambda x: x[0])[1]
+        # Map the selected strikes back to their OptionContract objects
+        short_put_obj = next(
+            (c for c in chain if c.put_call == "put" and c.strike == sp),
+            None,
+        )
+        short_call_obj = next(
+            (c for c in chain if c.put_call == "call" and c.strike == sc),
+            None,
+        )
+        if short_put_obj is None or short_call_obj is None:
+            return self._fallback_stub(symbol, delta_target, wing_width)
 
-        long_call_strike = short_call.strike + wing_width
-        long_put_strike = short_put.strike - wing_width
+        long_put_strike, short_put_strike = lp, sp
+        short_call_strike, long_call_strike = sc, lc
 
         order = {
             "symbol": symbol,
-            "expiry": short_call.expiry,
+            "expiry": short_call_obj.expiry if hasattr(short_call_obj, 'expiry') else None,
             "legs": {
-                "short_call": short_call.strike,
+                "short_call": short_call_strike,
                 "long_call": long_call_strike,
-                "short_put": short_put.strike,
+                "short_put": short_put_strike,
                 "long_put": long_put_strike,
             },
             "qty": 1,
-            "theoretical_credit": round(short_call.mid - long_call_strike * 0, 2),
+            # Placeholder theoretical credit – live impl will fetch option mid prices
+            "theoretical_credit": 0.0,
         }
 
         if account_equity and max_risk_per_trade:
