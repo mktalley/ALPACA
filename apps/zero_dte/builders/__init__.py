@@ -253,25 +253,16 @@ class OneSideStrangleBuilder(BaseBuilder):
             client = Options()
             today = date.today().strftime("%Y-%m-%d")
             chain = client.get_option_chain(symbol, expiry=today)
-            # Pick strike whose delta closest to delta_target on chosen side
-            best = None
-            for c in chain:
-                if c.put_call != side:
-                    continue
-                if c.greeks is None or c.greeks.delta is None:
-                    continue
-                diff = abs(abs(c.greeks.delta) - delta_target)
-                if best is None or diff < best[0]:
-                    best = (diff, c)
-            if best is None:
-                raise RuntimeError("No contract found")
-            short = best[1]
-            long_strike = short.strike - wing_width if side == "put" else short.strike + wing_width
+
+            from apps.zero_dte.utils.delta import select_short_leg
+            short_leg = select_short_leg(chain, delta_target, side)
+            short_strike = float(short_leg.strike)
+            long_strike = short_strike - wing_width if side == "put" else short_strike + wing_width
             order = {
                 "symbol": symbol,
-                "expiry": short.expiry,
+                "expiry": getattr(short_leg, "expiry", None),
                 "legs": {
-                    f"short_{side}": short.strike,
+                    f"short_{side}": short_strike,
                     f"long_{side}": long_strike,
                 },
                 "qty": 1,

@@ -78,9 +78,46 @@ class _DynamicStub(types.ModuleType):
         # Heuristic: capitalised → treat as class, else sub-module
         if name[:1].isupper():
             # For things like TimeFrame.Day produce unique sentinel constant too
-            cls = type(name, (), {})
-            # Pre-populate common constant-ish attributes (Day, Minute, Hour)
-            for const_name in ("Day", "Hour", "Minute"):
+            def _dynamic_init(self, *args, **kwargs):
+                # Accept any signature to mimic SDK enums
+                pass
+
+            def _dynamic_getattr(self, item):  # noqa: D401
+                return _Const(f"{name}.{item}")
+
+            def _dynamic_eq(self, other):  # noqa: D401
+                return isinstance(other, self.__class__) and self.__dict__ == other.__dict__
+
+            cls = type(
+                name,
+                (),
+                {
+                    "__init__": _dynamic_init,
+                    "__getattr__": _dynamic_getattr,
+                    "__repr__": lambda self: f"<Stub{self.__class__.__name__} {self.__dict__}",
+                    "__eq__": _dynamic_eq,
+                },
+            )
+            # Pre-populate common enum constants used by our tests
+            for const_name in (
+                "Day",
+                "Hour",
+                "Minute",
+                "IEX",
+                "SIP",
+                "OPRA",
+                "INDICATIVE",
+                "TRADING_PAPER",
+                "BROKER_SANDBOX",
+                "DATA",
+                "BUY",
+                "SELL",
+                "CALL",
+                "PUT",
+                "FULL",
+                "ASC",
+                "DESC",
+            ):
                 if not hasattr(cls, const_name):
                     setattr(cls, const_name, _Const(f"{name}.{const_name}"))
             setattr(self, name, cls)
@@ -116,6 +153,53 @@ def _ensure_module(path: str):  # e.g. "alpaca.broker.client"
 # Helper to create stub class and register in module
 
 def _stub_class(qualname: str):
+    """Create a dummy class <qualname> within its module hierarchy and return it."""
+    mod_path, _, cls_name = qualname.rpartition(".")
+    mod = _ensure_module(mod_path)
+    if hasattr(mod, cls_name):
+        return getattr(mod, cls_name)
+    cls = type(cls_name, (), {"__init__": lambda self, *a, **kw: None})
+    setattr(mod, cls_name, cls)
+    return cls
+
+# ---------------------------------------------------------------------------
+# Minimal behaviour stubs for WebSocket DataStream & models used in tests
+# ---------------------------------------------------------------------------
+
+if _real_sdk is None:
+    import sys as _sys
+    import types as _types
+
+    # Ensure alpaca.data.live.websocket module hierarchy exists
+    _ensure_module("alpaca.data.live.websocket")
+    _ws_mod = sys.modules["alpaca.data.live.websocket"]
+
+    class _StubDataStream:  # noqa: D401
+        def __init__(self, *args, **kwargs):
+            self.raw_data = kwargs.get("raw_data", False)
+
+        def _cast(self, payload):  # noqa: D401
+            import sys as __sys
+            t = payload.get("T")
+            map_code = {
+                "b": "Bar",
+                "t": "Trade",
+                "q": "Quote",
+                "o": "Orderbook",
+                "s": "TradingStatus",
+                "x": "TradeCancel",
+                "n": "News",
+            }
+            cls_name = map_code.get(t, "object")
+            # Lazily import target module so _DynamicStub can fabricate the class
+            mod_path = "alpaca.data.models" if cls_name not in {"Orderbook", "OrderbookQuote", "TradingStatus"} else "alpaca.data.models.orderbooks"
+            mod = __import__(mod_path, fromlist=[cls_name])
+            cls = getattr(mod, cls_name, object)
+            return cls()  # return blank instance
+
+    _ws_mod.DataStream = _StubDataStream
+
+# ---------------------------------------------------------------------------
     mod_path, _, cls_name = qualname.rpartition(".")
     mod = _ensure_module(mod_path)
     if hasattr(mod, cls_name):
