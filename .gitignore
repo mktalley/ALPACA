@@ -140,4 +140,8 @@ data/
 .vscode/
 
 # Cloudflare stuff
+
+# Application logs
+apps/logs/
+
 Cloudflare_CA.pem

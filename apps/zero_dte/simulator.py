@@ -149,8 +149,9 @@ def run_backtest(
     day = start
     grid_id = 0
     while day <= end:
-        # TODO: skip weekends/holidays via StockMarketCalendar; for now assume M-F
-        if day.weekday() >= 5:
+        # Skip non-trading days (weekends/holidays)
+        from apps.zero_dte.calendars import is_trading_day
+        if not is_trading_day(day):
             day += timedelta(days=1)
             continue
 
