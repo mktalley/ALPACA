@@ -205,6 +205,13 @@ class AlpacaBarLoader:
         self.timeframe = timeframe
 
     def get(self, symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
+        # Normalise tz – ensure both bounds are UTC-aware to avoid comparison
+        # errors when callers pass naive timestamps (common in unit-tests).
+        if start.tzinfo is None:
+            start = pd.Timestamp(start).tz_localize("UTC")
+        if end.tzinfo is None:
+            end = pd.Timestamp(end).tz_localize("UTC")
+
         if start >= end:
             raise ValueError("start must be < end")
         frames: list[pd.DataFrame] = []

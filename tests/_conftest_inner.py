@@ -53,19 +53,35 @@ STUBBED_MODULES: list[str] = []
 
 
 class _Const:
-    """Simple sentinel value used for enum-like constants in stubs."""
+    """Simple sentinel value mimicking Enum members (has `.value`, callable)."""
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, value: str | int | None = None):
         self._name = name
+        self._value = value if value is not None else name
 
+    # Represent like Enum: <EnumName.Member>
     def __repr__(self):
         return self._name
 
+    # Equality by identity OR underlying value / name
     def __eq__(self, other):  # noqa: D401
-        return isinstance(other, _Const) and other._name == self._name
+        return (
+            isinstance(other, _Const)
+            and other._name == self._name
+            and other._value == self._value
+        )
 
     def __hash__(self):
-        return hash(self._name)
+        return hash((self._name, self._value))
+
+    # Provide `.value` attribute used by tests/SDK
+    @property
+    def value(self):  # noqa: D401
+        return self._value
+
+    # Allow calling constant like a function (some SDK members are classes)
+    def __call__(self, *args, **kwargs):  # noqa: D401
+        return self
 
 
 class _DynamicStub(types.ModuleType):
@@ -101,6 +117,7 @@ class _DynamicStub(types.ModuleType):
             # Pre-populate common enum constants used by our tests
             for const_name in (
                 "Day",
+                "DAY",
                 "Hour",
                 "Minute",
                 "IEX",
@@ -199,15 +216,7 @@ if _real_sdk is None:
 
     _ws_mod.DataStream = _StubDataStream
 
-# ---------------------------------------------------------------------------
-    mod_path, _, cls_name = qualname.rpartition(".")
-    mod = _ensure_module(mod_path)
-    if hasattr(mod, cls_name):
-        return getattr(mod, cls_name)
-    cls = type(cls_name, (), {"__init__": lambda self, *a, **kw: None})
-    setattr(mod, cls_name, cls)
-    return cls
-# ---------------------------------------------------------------------------
+
 # Import hook to lazily stub *any* missing `alpaca.*` module so pytest
 # collection never fails due to ImportError. This is intentionally placed *very
 # early* so all subsequent imports benefit.
@@ -369,17 +378,54 @@ try:
             resp = requests.get(url)
             data = json.loads(resp.text)
             return data
+except Exception:
+    pass
 
-        def update_account(self, account_id: str, *args, **kwargs):  # noqa: D401
-            if not _is_uuid(account_id):
-                raise ValueError("invalid account_id")
-            return None
+# ---------------------------------------------------------------------------
+# Provide TimeFrame enum stub with .Day/.Hour/.Minute members if missing
+# ---------------------------------------------------------------------------
+try:
+    from alpaca.data import timeframe as _tf_mod
+    if not hasattr(_tf_mod, "TimeFrame"):
+        _tf_mod.TimeFrame = type("TimeFrame", (), {})
+    _tf = _tf_mod.TimeFrame
+    for _name in ("Day", "Hour", "Minute"):
+        if not hasattr(_tf, _name):
+            setattr(_tf, _name, _Const(f"TimeFrame.{_name}"))
+except Exception:
+    pass
 
-        # Provide alias expected by tests
-        def get_account_by_id(self, account_id: str):  # noqa: D401
-            if not _is_uuid(account_id):
-                raise ValueError("invalid account_id")
-            return {}
+# ---------------------------------------------------------------------------
+# Corporate Actions enums stubs for tests expecting .DIVIDEND etc.
+# ---------------------------------------------------------------------------
+try:
+    from alpaca.common import enums as _enums2
+    for _enum_name in ("CorporateActionType", "CorporateActionsType"):
+        if not hasattr(_enums2, _enum_name):
+            setattr(_enums2, _enum_name, type(_enum_name, (), {}))
+        _ecls = getattr(_enums2, _enum_name)
+        for _val in ("DIVIDEND", "CASH_DIVIDEND"):
+            if not hasattr(_ecls, _val):
+                setattr(_ecls, _val, _Const(f"{_enum_name}.{_val}"))
+except Exception:
+    pass
+
+# ---------------------------------------------------------------------------
+# Trading enums TimeInForce stub (.Day member needed)
+# ---------------------------------------------------------------------------
+try:
+    from alpaca.trading import enums as _tenums
+    if not hasattr(_tenums, "TimeInForce"):
+        _tenums.TimeInForce = type("TimeInForce", (), {})
+    _tif = _tenums.TimeInForce
+    if not hasattr(_tif, "Day"):
+        setattr(_tif, "Day", _Const("TimeInForce.Day"))
+    if not hasattr(_tif, "DAY"):
+        setattr(_tif, "DAY", _tif.Day)
+except Exception:
+    pass
+
+
 
     # Replace only if class object unchanged (i.e., stub)
     if _BC is not _BrokerPatch:
