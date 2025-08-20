@@ -3,7 +3,7 @@
 import logging
 from pathlib import Path
 
-from .config import get_trading_client, get_stock_client
+from .config import get_option_client, get_stock_client, get_trading_client
 from .strategies.zero_dte_credit_spread import ZeroDTECreditSpread
 
 LOG_PATH = Path(__file__).resolve().parent.parent / "logs" / "bot.log"
@@ -17,7 +17,10 @@ logging.basicConfig(
 def main() -> None:
     trading = get_trading_client()
     stock = get_stock_client()
-    strategy = ZeroDTECreditSpread(trading_client=trading, stock_client=stock)
+    option = get_option_client()
+    strategy = ZeroDTECreditSpread(
+        trading_client=trading, stock_client=stock, option_client=option
+    )
     strategy.run()
 
 

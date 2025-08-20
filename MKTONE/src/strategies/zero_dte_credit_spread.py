@@ -19,6 +19,7 @@ class ZeroDTECreditSpread:
 
     trading_client: Any
     stock_client: Any
+    option_client: Any
     symbol: str = "SPY"
     qty: int = 1
     ma_window: int = 5
@@ -58,6 +59,19 @@ class ZeroDTECreditSpread:
     def _create_order(self):
         from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce
         from alpaca.trading.requests import LimitOrderRequest, OptionLegRequest
+        try:  # pragma: no cover - fall back when SDK not fully installed
+            from alpaca.data.requests import OptionChainRequest
+        except Exception:  # pragma: no cover - minimal stub for tests
+            class OptionChainRequest:  # type: ignore
+                def __init__(self, underlying_symbol: str, expiration_date: dt.date):
+                    self.underlying_symbol = underlying_symbol
+                    self.expiration_date = expiration_date
+
+                def to_request_fields(self) -> dict[str, dt.date]:
+                    return {
+                        "underlying_symbol": self.underlying_symbol,
+                        "expiration_date": self.expiration_date,
+                    }
 
         direction = self._determine_direction()
         exp = dt.date.today()
@@ -67,14 +81,33 @@ class ZeroDTECreditSpread:
             short_strike = atm
             long_strike = atm - self.strike_width
             opt_type = "P"
-            limit_price = -0.5  # receive credit
         else:
             short_strike = atm
             long_strike = atm + self.strike_width
             opt_type = "C"
-            limit_price = -0.5
+
         short_symbol = build_option_symbol(self.symbol, exp, short_strike, opt_type)
         long_symbol = build_option_symbol(self.symbol, exp, long_strike, opt_type)
+
+        # Fetch option quotes and compute mid prices for each leg
+        chain_req = OptionChainRequest(
+            underlying_symbol=self.symbol, expiration_date=exp
+        )
+        chain = self.option_client.get_option_chain(chain_req)
+
+        def _mid(symbol: str) -> float:
+            snap = chain[symbol]
+            quote = snap.latest_quote
+            return (quote.bid_price + quote.ask_price) / 2
+
+        short_mid = _mid(short_symbol)
+        long_mid = _mid(long_symbol)
+        credit = short_mid - long_mid
+
+        # Store profit target and stop loss as absolute prices
+        self.profit_target_amt = credit * self.profit_target
+        self.stop_loss_amt = credit * self.stop_loss
+
         legs = [
             OptionLegRequest(symbol=short_symbol, ratio_qty=1, side=OrderSide.SELL),
             OptionLegRequest(symbol=long_symbol, ratio_qty=1, side=OrderSide.BUY),
@@ -84,7 +117,7 @@ class ZeroDTECreditSpread:
             legs=legs,
             qty=self.qty,
             time_in_force=TimeInForce.DAY,
-            limit_price=limit_price,
+            limit_price=-credit,
         )
         return order
 
