@@ -18,10 +18,14 @@ logging.basicConfig(
 def main(poll_interval: float = 60) -> None:
     trading = get_trading_client()
     stock = get_stock_client()
+codex/update-order-creation-to-use-market-data
     option = get_option_client()
     strategy = ZeroDTECreditSpread(
         trading_client=trading, stock_client=stock, option_client=option
     )
+
+    strategy = ZeroDTECreditSpread(trading_client=trading, stock_client=stock)
+main
 
     while True:
         clock = trading.get_clock()
