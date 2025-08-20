@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -93,8 +94,45 @@ class ZeroDTECreditSpread:
         order = self._create_order()
         logging.info("Submitting order: %s", order)
         try:
-            self.trading_client.submit_order(order)
-            logging.info("Order submitted successfully.")
+            submitted = self.trading_client.submit_order(order)
+            order_id = getattr(submitted, "id", submitted)
+            entry_credit = abs(
+                float(getattr(submitted, "filled_avg_price", getattr(order, "limit_price", 0)))
+            )
+            logging.info("Order submitted successfully. ID: %s", order_id)
         except Exception as exc:  # pragma: no cover - network
             logging.exception("Order submission failed: %s", exc)
+            return
+
+        for _ in range(60):  # poll for up to 60 cycles
+            try:
+                position = self.trading_client.get_open_position(order_id)
+            except Exception:  # pragma: no cover - network
+                position = None
+
+            if not position:
+                logging.info("No open position found, exiting poll loop")
+                break
+
+            current_credit = float(getattr(position, "current_credit", 0.0))
+            if current_credit <= entry_credit * (1 - self.profit_target):
+                logging.info("Take-profit triggered at %.2f", current_credit)
+                self.trading_client.close_position(order_id)
+                break
+            if current_credit >= entry_credit * (1 + self.stop_loss):
+                logging.info("Stop-loss triggered at %.2f", current_credit)
+                self.trading_client.close_position(order_id)
+                break
+
+            clock = self.trading_client.get_clock()
+            close_time = getattr(clock, "market_close", None)
+            if close_time is None:
+                close_time = getattr(clock, "next_close")
+            now = dt.datetime.now(dt.timezone.utc)
+            if close_time - now < dt.timedelta(minutes=5):
+                logging.info("End-of-day close before market close")
+                self.trading_client.close_position(order_id)
+                break
+
+            time.sleep(1)
 
